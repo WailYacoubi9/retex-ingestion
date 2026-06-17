@@ -1,0 +1,22 @@
+# Donnees : confidentielles (tickets, noms collaborateurs, projets/clients,
+# exports Postman prod) ET volumineuses -> jamais commitees
+data/
+
+# Scripts d'analyse / debug jetables
+scripts/_*.py
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Environnements virtuels
+.venv/
+venv/
+
+# Secrets / config locale
+.env
+
+# Logs
+*.log

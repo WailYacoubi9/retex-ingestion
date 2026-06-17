@@ -1,0 +1,142 @@
+metadata:
+  module_name: q_incident_securite
+  module_label: "Incident de sécurité aéronautique"
+  source_format: hal
+  embedded_key: module
+  description: "FNE - Fiche de Notification d'Événement"
+
+champs_metier:
+  - canonical: incident_id_source
+    source: _id
+    type: str
+    required: true
+  - canonical: numero_fe
+    source: numero_fe
+    type: str
+    required: true
+  - canonical: type_nc
+    source: type_nc
+    type: str
+    required: true
+  - canonical: abbr
+    source: abbr
+    type: str
+    required: false
+  - canonical: titre
+    source: titre_nc
+    type: str
+    required: true
+  - canonical: detail
+    source: detail_nc
+    type: str
+    required: true
+  - canonical: recolte_faits
+    source: recolte_faits
+    type: str
+    required: false
+  - canonical: notes_suivi
+    source: notes_suivi_des_echanges
+    type: str
+    required: false
+  - canonical: etape
+    source: etape
+    type: int
+    required: true
+  - canonical: archive
+    source: archive_nc
+    type: int
+    required: true
+  - canonical: blesses_raw
+    source: blesses
+    type: int
+    required: false
+
+champs_derives:
+  - canonical: presence_blesses
+    derived_from: blesses_raw
+    logic: value_not_zero
+    type: bool
+  - canonical: pret_envoi_eccairs
+    derived_from: pretPourEnvoiEccairs_q_incident_securite
+    logic: list_label_is_oui
+    type: bool
+
+dates_heures:
+  - canonical: date_evenement
+    source: date_evenement
+    type: datetime
+    required: true
+  - canonical: date_creation
+    source: date_nc
+    type: datetime
+    required: true
+  - canonical: heure_evenement
+    source: heure
+    type: time
+    required: false
+
+relations_societe:
+  source: societe
+  type: list_of_ids
+  relation_type: CONCERNE
+
+relations_personne:
+  - role: emetteur
+    source_login: emetteur_nc
+    source_id: id_emetteur_nc
+    relation_type: EMIS_PAR
+
+relations_referentiel:
+  - canonical: service_responsable
+    source: service_responsable
+    family: service_responsable
+    is_list: false
+    relation_type: RESPONSABLE
+
+champs_textuels:
+  - canonical: titre
+    min_length: 5
+    for_embedding: true
+    for_llm: false
+  - canonical: detail
+    min_length: 50
+    for_embedding: true
+    for_llm: true
+  - canonical: recolte_faits
+    min_length: 30
+    for_embedding: true
+    for_llm: false
+  - canonical: notes_suivi
+    min_length: 30
+    for_embedding: true
+    for_llm: false
+
+champs_ignores:
+  - field: _links
+    reason: "URL canonique reconstructible depuis _id"
+  - field: _module
+    reason: "Identique à metadata.module_name"
+  - field: _object
+    reason: "Meta-donnee technique"
+  - field: _table
+    reason: "Detail d'implementation backend"
+  - field: nom_fork
+    reason: "Identique a _module"
+  - field: id_type
+    reason: "ID interne sans valeur metier"
+  - field: user
+    reason: "Toujours 0 dans l'echantillon"
+  - field: resp_traitement_nc
+    reason: "Toujours 0 dans l'echantillon"
+  - field: id_unite
+    reason: "Liste a clarifier avec Oussamah"
+  - field: site_application
+    reason: "Codes de sites a clarifier avec Oussamah"
+
+extras:
+  enabled: true
+  whitelist:
+    - nature_evenement_indicatif_appel
+    - nature_evenement_indicatif_appel2
+    - entite_mis
+    - immatricu1

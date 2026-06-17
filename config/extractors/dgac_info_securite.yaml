@@ -1,0 +1,89 @@
+metadata:
+  module_name: dgac_info_securite
+  module_label: "Info Securite DGAC"
+  source_format: markdown
+  description: "Bulletins Info Securite publies par la DGAC (parsing OpenDataLoader)"
+  version: "1.0.0"
+
+# Champs textuels du dataclass InfoSecuriteCanonique vectorises dans Qdrant.
+# Chaque entree devient un chunk distinct, embedde separement avec bge-m3.
+# Permet une recherche RAG fine-grained : un utilisateur peut matcher sur
+# le sujet, l'objectif, le contexte, les actions, ou le resume LLM independamment.
+champs_textuels:
+  - canonical: sujet
+    min_length: 10
+    for_embedding: true
+    for_llm: false
+    description: "Phrase courte resumant le theme. Tres pertinent en RAG."
+
+  - canonical: objectif
+    min_length: 20
+    for_embedding: true
+    for_llm: false
+    description: "But du bulletin. Souvent court et explicite."
+
+  - canonical: contexte
+    min_length: 100
+    for_embedding: true
+    for_llm: true
+    description: "Bloc narratif des faits. Source principale pour le resume LLM."
+
+  - canonical: actions_recommandees
+    min_length: 50
+    for_embedding: true
+    for_llm: true
+    description: "Recommandations DGAC. Contenu cle pour les requetes 'que faire ?'."
+
+  - canonical: annexe
+    min_length: 100
+    for_embedding: true
+    for_llm: false
+    description: "Annexes integrees au bulletin (reglementaire principalement)."
+
+  - canonical: references
+    min_length: 30
+    for_embedding: true
+    for_llm: false
+    description: "Liens et documents externes. Peut etre court."
+
+  - canonical: contenu_hors_tableau
+    min_length: 100
+    for_embedding: true
+    for_llm: false
+    description: "Annexes ou references en flux libre apres les tableaux (~4 IS)."
+
+# Champs ignores volontairement par le parser pour eviter de polluer les
+# extra_fields. Correspondent au bruit observe dans le corpus.
+champs_ignores:
+  - label: "une info securite est un document"
+    reason: "Texte d'avertissement DGAC standard, repete sur chaque IS"
+  - label: "info securite dgac"
+    reason: "En-tete de page DGAC repete sur chaque page du PDF"
+
+# Configuration des extra_fields : champs ad hoc detectes dans le tableau
+# qui ne mappent vers aucun champ canonique mais qui sont conserves.
+# Visibles dans le corpus actuel : perspectives (2020/05), reserves (2018/02),
+# prevention des interferences 5g (2021/01).
+extras:
+  enabled: true
+  whitelist:
+    - perspectives
+    - reserves
+    - prevention des interferences 5g
+  # Le parser ajoute automatiquement tout nouveau label inconnu ici.
+  # La whitelist sert juste a documenter ceux qu'on connait deja.
+
+# Configuration LLM (utilisee par llm_enricher_info_securite.py)
+llm:
+  enabled: true
+  type: resume_operateur
+  model: "llama3.1:8b-instruct-q4_K_M"
+  prompt_focus: "point_de_vue_operateur_terrain"
+  champs_source:
+    # Champs concatenes pour construire le contexte du prompt LLM
+    - sujet
+    - objectif
+    - contexte
+    - actions_recommandees
+  max_chars_input: 8000
+  target_resume_sentences: 3
