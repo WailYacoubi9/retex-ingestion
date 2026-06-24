@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, QDRANT_URL, OLLAMA_URL
 from clients import Neo4jClient, OllamaClient, QdrantWrapper
 from extractor import extract_incident
 from llm_enricher import enrich_incident
@@ -27,10 +28,10 @@ payload = r["payload"]
 
 print(f"Testing loader on incident from {meta['postman_path']}\n")
 
-with Neo4jClient(uri="bolt://localhost:7687", user="neo4j", password="retex_dev_pwd") as neo4j, \
-     OllamaClient(url="http://localhost:11434") as ollama:
+with Neo4jClient(uri=NEO4J_URI, user=NEO4J_USER, password=NEO4J_PASSWORD) as neo4j, \
+     OllamaClient(url=OLLAMA_URL) as ollama:
 
-    qdrant = QdrantWrapper(url="http://localhost:6333")
+    qdrant = QdrantWrapper(url=QDRANT_URL)
 
     # 1. Bootstrap
     bootstrap_neo4j(neo4j)

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 import time
 from pathlib import Path
@@ -23,6 +22,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 from clients import Neo4jClient
 from loader_projets import (
     bootstrap_neo4j_schema,
@@ -32,11 +32,6 @@ from loader_projets import (
     write_to_neo4j,
 )
 from parser_projets import parse_projets
-
-
-NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "retex_dev_pwd")
 
 logging.basicConfig(
     level=logging.INFO,

@@ -1,0 +1,342 @@
+# =============================================================================
+#  SCHÉMA — Incident Sécurité v2 (export plateforme intra'know)
+#
+#  SOURCE DE VÉRITÉ UNIQUE : documente + pilote l'extraction + génère le modèle.
+#    - codegen  : python scripts/codegen_model.py <ce fichier> --out models_incident_securite_v2.py
+#    - extraction : lu au runtime par extractor_incident_securite_v2.py
+#
+#  Chaque champ a un `role` :
+#    propriete | date | flag | relation
+#  + `embedding: true` (+ min_length) sur les textes à vectoriser.
+#
+#  TYPES : texte | entier | decimal | booleen | date | horodatage | heure
+#  ⚠️ Les `label:` (clé FR de l'export) sont à VÉRIFIER contre le vrai fichier.
+# =============================================================================
+
+module:
+  nom_technique: incident_securite_v2
+  libelle: "Incident de sécurité (export plateforme)"
+  source_format: liste_plate
+  cle_identite_label: "Num F.E."        # champ source identité
+  cle_identite_canonical: numero_fe     # -> UUID stable
+
+champs:
+
+  # --- Identité / base ------------------------------------------------------
+  - cle: numero_fe
+    label: "Num F.E."
+    role: propriete
+    type: texte
+    obligatoire: true
+    description: "Référence unique de la fiche (identité). Ex : FNE/26/0245."
+
+  - cle: titre
+    label: "titre"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 5
+    description: "Titre court de l'incident."
+
+  - cle: detail
+    label: "Description de l'événement et de son contexte"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    description: "Narratif principal de l'événement."
+
+  - cle: type_fiche
+    label: "type *"
+    role: propriete
+    type: texte
+    description: "Type de fiche (FNE à 99%)."
+
+  - cle: etat
+    label: "État"
+    role: propriete
+    type: texte
+    description: "État de la fiche : Clos / Actif / Classé sans suite."
+
+  - cle: etape
+    label: "Étape"
+    role: propriete
+    type: texte
+    description: "Workflow : Valider / Agir / Analyser / Identifier."
+
+  - cle: statut_ecc
+    label: "Statut événement (ECC)"
+    role: propriete
+    type: texte
+    description: "Statut ECCAIRS : Clos sommaire / Clos détaillé / Ouvert."
+
+  - cle: aerodrome
+    label: "nom de l'aérodrome (ECC)"
+    role: propriete
+    type: texte
+    description: "Aérodrome : LYS (Lyon Saint-Exupéry) ou Lyon Bron."
+
+  # --- Classification (haute valeur) ---------------------------------------
+  - cle: severite
+    label: "classification des risques (ECC)"
+    role: propriete
+    type: texte
+    description: "Niveau de risque ECCAIRS (remplace la sévérité LLM). Complet à 99.8%."
+    valeurs_possibles:
+      "1 - faible": "Risque faible"
+      "2 - tolérable": "Risque tolérable"
+      "3 - important": "Risque important"
+      "4 - élevé": "Risque élevé"
+      "5 - intolérable": "Risque intolérable"
+
+  - cle: classification
+    label: "classification événement (ECC)"
+    role: propriete
+    type: texte
+    description: "Incident / Occurrence sans effet / Incident sérieux / Accident."
+
+  - cle: condition_lumineuse
+    label: "Lors de l'évènement, il faisait"
+    role: propriete
+    type: texte
+    description: "Condition lumineuse : Jour / Nuit."
+
+  - cle: processus
+    label: "processus"
+    role: propriete
+    type: texte
+    description: "Processus interne (PM2, PM4, PM5...)."
+
+  - cle: categorie_id
+    label: "id categorie evenement"
+    role: propriete
+    type: texte
+    description: "Identifiant de catégorie d'événement."
+
+  - cle: organisations_informees
+    label: "organisations informées (ECC)"
+    role: propriete
+    type: texte
+    description: "Organisations informées (DSAC dans la quasi-totalité)."
+
+  # --- Narratifs additionnels (embedding, filtre des '0') ------------------
+  - cle: action_corrective
+    label: "Action corrective immédiate"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    filtre_vide: true
+    description: "Action corrective immédiate (massivement '0' à filtrer)."
+
+  - cle: analyse_chaud
+    label: "Analyse à chaud"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    filtre_vide: true
+    description: "Analyse terrain immédiate."
+
+  - cle: desc_cause_1
+    label: "desc cause 1"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    description: "Cause principale rédigée (analyse 5M)."
+
+  - cle: desc_cause_3
+    label: "desc cause 3"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    description: "Cause complémentaire (5M)."
+
+  - cle: desc_cause_5
+    label: "desc cause 5"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    description: "Cause complémentaire (5M)."
+
+  - cle: detail_verification
+    label: "détail de la vérification"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    filtre_vide: true
+    description: "Détail de la vérification (filtrer les '0')."
+
+  # --- Dates / heures -------------------------------------------------------
+  - cle: date_creation
+    label: "Date"
+    role: date
+    type: horodatage
+    obligatoire: true
+    description: "Date de saisie de la fiche."
+
+  - cle: date_evenement
+    label: "date de l'évènement (ECC)"
+    role: date
+    type: horodatage
+    obligatoire: true
+    description: "Date réelle de l'événement."
+
+  - cle: heure_evenement
+    label: "heure locale de l'évènement (ECC)"
+    role: date
+    type: heure
+    description: "Heure locale de l'événement."
+
+  - cle: date_maj
+    label: "Date dernière mise à jour"
+    role: date
+    type: horodatage
+    description: "Date de dernière mise à jour de la fiche."
+
+  # --- Flags (Oui/Non -> booléen) ------------------------------------------
+  - cle: presence_blesses
+    label: "Y a-t-il des blessés ?"
+    role: flag
+    type: booleen
+    description: "Présence de blessés (Oui* -> vrai)."
+
+  - cle: analyse_causes_faite
+    label: "Analyse des causes"
+    role: flag
+    type: booleen
+    description: "Une analyse des causes a-t-elle été faite."
+
+  - cle: traitement_termine
+    label: "traitement terminé"
+    role: flag
+    type: booleen
+    description: "Traitement de la fiche terminé."
+
+  - cle: est_significatif
+    label: "Analyse détaillée (ev. significatif)"
+    role: flag
+    type: booleen
+    description: "Événement significatif (analyse détaillée) — cas graves."
+
+  - cle: est_rex
+    label: "REX"
+    role: flag
+    type: booleen
+    description: "Fiche marquée retour d'expérience."
+
+  - cle: actions_efficaces
+    label: "actions jugées efficaces"
+    role: flag
+    type: booleen
+    description: "Actions correctives jugées efficaces."
+
+  # --- Relations graphe -----------------------------------------------------
+  - cle: societe
+    label: "nom de la société"
+    role: relation
+    noeud: Societe
+    cle_noeud: nom
+    relation: CONCERNE
+    description: "Prestataire / société impliquée (90% null)."
+
+  - cle: type_evenement
+    label: "type d'événement (ECC)"
+    role: relation
+    noeud: TypeEvenement
+    cle_noeud: label
+    relation: DE_TYPE
+    description: "Typologie de l'événement (FOD, collision aviaire...)."
+
+  - cle: lieu
+    label: "lieu de l'évènement (ECC)"
+    role: relation
+    noeud: Lieu
+    cle_noeud: label
+    relation: LOCALISE_EN
+    description: "Lieu : Piste / Parking / Aire de trafic..."
+
+  - cle: phase_vol
+    label: "phase de vol (ECC)"
+    role: relation
+    noeud: PhaseVol
+    cle_noeud: label
+    relation: EN_PHASE_DE_VOL
+    description: "Phase de vol (Stationnement, Atterrissage...)."
+
+  - cle: compagnie
+    label: "la compagnie (ECC)"
+    role: relation
+    noeud: Compagnie
+    cle_noeud: nom
+    relation: IMPLIQUE_COMPAGNIE
+    description: "Compagnie aérienne impliquée."
+
+  - cle: type_aeronef
+    label: "type d'aéronef (ECC)"
+    role: relation
+    noeud: TypeAeronef
+    cle_noeud: label
+    relation: IMPLIQUE_AERONEF
+    description: "Type d'aéronef (A320, A319...)."
+
+  - cle: notifiant
+    label: "Notifiant"
+    role: relation
+    noeud: Notifiant
+    cle_noeud: label
+    relation: NOTIFIE_PAR
+    description: "Catégorie de notifiant (CCO, SSLIA...)."
+
+  - cle: entite_mise_en_cause
+    label: "Entité mise en cause"
+    role: relation
+    noeud: Entite
+    cle_noeud: nom
+    relation: MIS_EN_CAUSE
+    description: "Entité mise en cause."
+
+  - cle: service_responsable
+    label: "Service responsable"
+    role: relation
+    noeud: Service
+    cle_noeud: label
+    relation: RESPONSABLE
+    description: "Service responsable du traitement."
+
+  - cle: emetteur
+    label: "emetteur"
+    role: relation
+    noeud: Personne
+    cle_noeud: login
+    relation: EMIS_PAR
+    description: "Agent émetteur de la fiche."
+
+  - cle: verificateur
+    label: "Vérificateur"
+    role: relation
+    noeud: Personne
+    cle_noeud: login
+    relation: VERIFIE_PAR
+    description: "Agent vérificateur."
+
+# -----------------------------------------------------------------------------
+#  Champs source ignorés (constantes / quasi-null — cf analyse)
+# -----------------------------------------------------------------------------
+champs_ignores:
+  - "Moyens financiers"
+  - "Main d'œuvre"
+  - "desc cause 7"
+  - "langue de l'exposé (ECC)"
+  - "entité responsable (ECC)_2"
+  - "méthode de classification (ECC)"
+  - "Transmettre vers Eccairs"
+  - "latitude"
+  - "longitude"
+  - "etat/zone de l'événement (ECC)"
+  - "contribution MTO (ECC)"
+  - "etat du sol à l'endroit de l'év."

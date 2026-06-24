@@ -1,0 +1,316 @@
+# =============================================================================
+#  SCHÉMA CANONIQUE — Incident de sécurité aéronautique (FNE)
+#  Module intra'know : q_incident_securite
+#
+#  CE FICHIER EST LA SOURCE DE VÉRITÉ du modèle de données.
+#  Un script de génération le transforme en dataclass Python (models.py).
+#  → Voir le mode d'emploi complet dans GUIDE.md (même dossier).
+#
+#  LÉGENDE :
+#    🟢  = modifiable
+#    🔴  = réservé aux développeurs — NE PAS TOUCHER
+#
+#  TYPES AUTORISÉS pour le champ "type" (liste fermée) :
+#    texte | entier | decimal | booleen | date | horodatage | heure
+#
+# -----------------------------------------------------------------------------
+#  👉 POUR L'EXPERT(E) MÉTIER
+#  Ce fichier est déjà pré-rempli. Ctrl+F sur  "⚠️ à confirmer (métier)"  et
+#  remplace chaque marqueur. Deux choses à compléter :
+#    1. libelle_formulaire → le nom du champ tel qu'AFFICHÉ dans le formulaire
+#                            intra'know (le nom du JSON est souvent différent).
+#    2. valeurs_possibles → la signification de chaque code (etape, archive...).
+#
+#  ⚠️ Ne devine pas : si tu n'es pas sûr(e), laisse le marqueur en place.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+#  EN-TÊTE DU MODULE
+# -----------------------------------------------------------------------------
+module:
+  nom_technique: q_incident_securite          # 🔴 identifiant technique, figé
+  libelle: "Incident de sécurité aéronautique (FNE)"   # 🟢 nom lisible
+  description: "Fiche de Notification d'Événement (FNE) issue d'intra'know."  # 🟢
+  source_format: hal                          # 🔴 format de l'API source
+  embedded_key: module                        # 🔴 clé du tableau dans _embedded
+  cle_source: _id                             # 🔴 champ source servant d'identifiant
+
+
+# -----------------------------------------------------------------------------
+#  🟢 CHAMPS SIMPLES
+#
+#  Chaque champ a :
+#    cle                🔴 nom interne FIGÉ (le nôtre, jamais renommé)
+#    nom_json           nom du champ dans le JSON (export API) — rempli pour toi
+#    libelle_formulaire 🟢 nom AFFICHÉ dans le formulaire intra'know — À COMPLÉTER
+#    type               type de la donnée (liste fermée, voir en-tête)
+#    obligatoire       true si toujours présent
+#    description       à quoi sert le champ
+#    valeurs_possibles (champs codés) sens de chaque valeur
+#    anciens_noms      historique des renommages
+# -----------------------------------------------------------------------------
+champs:
+
+  - cle: numero_fe
+    nom_json: numero_fe
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Numéro de FNE"
+    type: texte
+    obligatoire: true
+    description: "Référence unique de la fiche, format FNE/AA/NNNN (ex : FNE/26/0245)."
+    anciens_noms: []
+
+  - cle: titre
+    nom_json: titre_nc
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Titre"
+    type: texte
+    obligatoire: true
+    description: "Titre court saisi par le déclarant, affiché dans les listes."
+    anciens_noms: []
+
+  - cle: detail
+    nom_json: detail_nc
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Description" / "Détail"
+    type: texte
+    obligatoire: true
+    description: "Récit complet de l'événement. Champ narratif principal (sert au moteur de recherche)."
+    anciens_noms: []
+
+  - cle: type_nc
+    nom_json: type_nc
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Type"
+    type: texte
+    obligatoire: true
+    description: "Type de la notification. Vaut 'FNE' pour ce module."
+    anciens_noms: []
+
+  - cle: abbr
+    nom_json: abbr
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Abréviation"
+    type: texte
+    obligatoire: false
+    description: "Abréviation du type de fiche (ex : FNE)."
+    anciens_noms: []
+
+  - cle: recolte_faits
+    nom_json: recolte_faits
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Récolte des faits"
+    type: texte
+    obligatoire: false
+    description: "Actions immédiates et constats relevés sur le terrain."
+    anciens_noms: []
+
+  - cle: notes_suivi
+    nom_json: notes_suivi_des_echanges
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Notes de suivi"
+    type: texte
+    obligatoire: false
+    description: "Échanges et suites administratives (mails, relances...)."
+    anciens_noms: []
+
+  - cle: etape
+    nom_json: etape
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Étape"
+    type: entier
+    obligatoire: true
+    description: "Code du stade de traitement de la fiche."
+    valeurs_possibles:                 # valeurs réellement observées (le 4 n'apparaît jamais)
+      1: "⚠️ à confirmer (métier)"
+      2: "⚠️ à confirmer (métier)"
+      3: "⚠️ à confirmer (métier)"
+      5: "⚠️ à confirmer (métier)"
+    anciens_noms: []
+
+  - cle: archive
+    nom_json: archive_nc
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Archivage"
+    type: entier
+    obligatoire: true
+    description: "Code d'état d'archivage de la fiche."
+    valeurs_possibles:
+      0: "⚠️ à confirmer (métier)"
+      1: "⚠️ à confirmer (métier)"
+      2: "⚠️ à confirmer (métier)"
+    anciens_noms: []
+
+  - cle: blesses_raw
+    nom_json: blesses
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Blessés"
+    type: entier
+    obligatoire: false
+    description: >-
+      🚩 NE SEMBLE PAS être un nombre de blessés : seules les valeurs 0 et 100
+      sont observées sur 100 fiches. Probablement un CODE (ex : 0 = non,
+      100 = oui ou « non renseigné »). À clarifier avec le métier AVANT de se
+      fier au champ dérivé presence_blesses.
+    valeurs_possibles:
+      0: "⚠️ à confirmer (métier)"
+      100: "⚠️ à confirmer (métier)"
+    anciens_noms: []
+
+  # --- Dates et heures (ce sont aussi des champs simples) ---
+
+  - cle: date_creation
+    nom_json: date_nc
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Date de création"
+    type: horodatage
+    obligatoire: true
+    description: "Date et heure de saisie de la FNE dans intra'know."
+    anciens_noms: []
+
+  - cle: date_evenement
+    nom_json: date_evenement
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Date de l'événement"
+    type: horodatage
+    obligatoire: true
+    description: "Date et heure réelles de l'incident (peut différer de la date de création)."
+    anciens_noms: []
+
+  - cle: heure_evenement
+    nom_json: heure
+    libelle_formulaire: "⚠️ à confirmer (métier)"   # ex. "Heure de l'événement"
+    type: heure
+    obligatoire: false
+    description: "Heure seule de l'événement, quand elle est fournie séparément."
+    anciens_noms: []
+
+
+# =============================================================================
+#  🔴🔴🔴  ZONE DÉVELOPPEUR — NE PAS MODIFIER  🔴🔴🔴
+#  Tout ce qui suit décrit le modèle de graphe, les calculs et les champs
+#  techniques. Une erreur ici casse l'ingestion. Demander à un développeur.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+#  🔴 CHAMPS DÉRIVÉS — calculés à partir d'un autre champ
+# -----------------------------------------------------------------------------
+champs_derives:
+  - cle: presence_blesses
+    type: booleen
+    derived_from: blesses_raw
+    logic: value_not_zero          # true si la valeur != 0
+    description: "Présence de blessés, déduite de blesses_raw."
+
+  - cle: pret_envoi_eccairs
+    type: booleen
+    derived_from: pretPourEnvoiEccairs_q_incident_securite
+    logic: list_label_is_oui       # true si la liste contient un _label == 'oui'
+    description: "Indique si la fiche est prête pour l'envoi ECCAIRS."
+
+
+# -----------------------------------------------------------------------------
+#  🔴 RELATIONS — produisent des nœuds Neo4j liés à l'incident
+# -----------------------------------------------------------------------------
+relations:
+
+  societe:
+    nom_json: societe
+    cardinalite: liste_d_ids        # ex : [5, 30] -> plusieurs nœuds :Societe
+    entite: SocieteRef
+    relation_type: CONCERNE
+    description: "IDs des sociétés concernées (multi-tenancy)."
+
+  personnes:
+    - role: emetteur
+      nom_json_login: emetteur_nc
+      nom_json_id: id_emetteur_nc
+      entite: PersonneRef
+      relation_type: EMIS_PAR
+      description: "Auteur de la fiche (login + id intra'know)."
+
+  referentiels:
+    - cle: service_responsable
+      nom_json: service_responsable
+      family: service_responsable
+      est_liste: false
+      entite: ReferentielRef
+      relation_type: RESPONSABLE
+      description: "Service responsable du traitement (valeur de liste de référence)."
+
+
+# -----------------------------------------------------------------------------
+#  🔴 CHAMPS TECHNIQUES — gérés par le système, pas par la source
+# -----------------------------------------------------------------------------
+techniques:
+  - cle: incident_id
+    type: texte
+    obligatoire: true
+    generation: uuid_v5            # UUID stable depuis (source_module + incident_id_source)
+    description: "Identifiant interne stable. Garantit l'idempotence de l'ingestion."
+
+  - cle: incident_id_source
+    type: texte
+    obligatoire: true
+    source: cle_source             # = module.cle_source (_id)
+    description: "ID d'origine de l'incident dans intra'know."
+
+  - cle: source_module
+    type: texte
+    obligatoire: true
+    valeur: q_incident_securite    # constante = module.nom_technique
+    description: "Module d'origine. Permet de filtrer par source."
+
+  - cle: source_url
+    type: texte
+    obligatoire: false
+    description: "URL HAL de la ressource, pour traçabilité."
+
+  - cle: is_test_data
+    type: booleen
+    obligatoire: false
+    defaut: false
+    description: "Marque les données de test (templates Postman résiduels)."
+
+  - cle: last_indexed_at
+    type: texte
+    obligatoire: false
+    description: "Horodatage ISO de la dernière indexation (monitoring)."
+
+  - cle: extra_fields
+    type: dictionnaire             # type technique : non destiné aux champs simples
+    obligatoire: false
+    description: "Champs rares capturés tels quels (voir section extras)."
+
+  - cle: llm
+    type: objet                    # objet LLMEnrichment (résumé, sévérité perçue...)
+    obligatoire: false
+    description: "Enrichissement LLM attaché après l'ingestion. Vide au départ."
+
+
+# -----------------------------------------------------------------------------
+#  🔴 EXTRAS — champs rares capturés tels quels (sans typage)
+# -----------------------------------------------------------------------------
+extras:
+  enabled: true
+  whitelist:
+    - nature_evenement_indicatif_appel
+    - nature_evenement_indicatif_appel2
+    - entite_mis
+    - immatricu1
+
+
+# -----------------------------------------------------------------------------
+#  🔴 CHAMPS SOURCE IGNORÉS — documentés pour mémoire
+# -----------------------------------------------------------------------------
+champs_ignores:
+  - field: site_application
+    reason: "Codes de sites à clarifier."
+  - field: id_unite
+    reason: "Liste à clarifier."
+  - field: nom_fork
+    reason: "Identique à _module."
+  - field: id_type
+    reason: "ID interne sans valeur métier."
+  - field: user
+    reason: "Toujours 0 dans l'échantillon."
+  - field: resp_traitement_nc
+    reason: "Toujours 0 dans l'échantillon."
+  - field: _links
+    reason: "URL reconstructible depuis _id."
+  - field: _module
+    reason: "Identique à metadata.nom_technique."
+  - field: _table
+    reason: "Détail d'implémentation backend."
+  - field: _object
+    reason: "Méta-donnée technique."

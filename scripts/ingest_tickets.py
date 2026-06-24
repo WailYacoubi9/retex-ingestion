@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -24,6 +23,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, QDRANT_URL, OLLAMA_URL, OLLAMA_TIMEOUT
 from clients import Neo4jClient, OllamaClient, QdrantWrapper
 from enrich_tickets_csv import build_csv_index, enrich_raw_tickets
 from llm_enricher_tickets import enrich_ticket
@@ -37,15 +37,6 @@ from parser_tickets import parse_tickets
 
 
 DEFAULT_INPUT = Path("data/samples/tickets.json")
-
-NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "retex_dev_pwd")
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-# Timeout HTTP Ollama (s). qwen2.5:14b partiellement sur CPU peut depasser
-# largement 120 s par ticket -> on monte a 600 s par defaut.
-OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "600"))
 
 logging.basicConfig(
     level=logging.INFO,

@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from config import OLLAMA_URL
 from clients import OllamaClient
 from extractor import extract_incident
 from llm_enricher import enrich_incident
@@ -20,7 +21,7 @@ with INPUT.open(encoding="utf-8") as f:
 
 print(f"Testing enricher on {len(records)} payloads\n")
 
-with OllamaClient(url="http://localhost:11434") as ollama:
+with OllamaClient(url=OLLAMA_URL) as ollama:
     for i, r in enumerate(records):
         meta = r["_extracted_meta"]
         payload = r["payload"]
