@@ -9,6 +9,7 @@ Usage :
     python scripts/ingest_incident_securite_v2.py --input <fichier> --limit 50
     python scripts/ingest_incident_securite_v2.py --input <fichier> --dry-run
     python scripts/ingest_incident_securite_v2.py --input <fichier> --no-embedding
+    python scripts/ingest_incident_securite_v2.py --input <fichier> --with-llm
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from loader_incident_securite_v2 import (
     write_incident_to_neo4j,
     write_incident_to_qdrant,
 )
+from llm_enricher_incident_securite_v2 import enrich_incident
 
 DEFAULT_INPUT = Path("data/samples/incidents_securites.json")
 DEFAULT_CONFIG = PROJECT_ROOT / "config" / "schemas" / "incident_securite_v2.schema.yaml"
@@ -52,7 +54,7 @@ def _charger_payloads(path: Path) -> list[dict]:
 
 
 def run(input_path: Path, config_path: Path, limit: int, offset: int,
-        dry_run: bool, embedding: bool) -> int:
+        dry_run: bool, embedding: bool, llm: bool = False) -> int:
     if not input_path.exists():
         logger.error("Fichier introuvable : %s", input_path)
         return 1
@@ -66,8 +68,8 @@ def run(input_path: Path, config_path: Path, limit: int, offset: int,
         payloads = payloads[:limit]
 
     logger.info("Fiches à traiter : %d", len(payloads))
-    logger.info("Neo4j=%s  Qdrant=%s  embedding=%s  dry_run=%s",
-                NEO4J_URI, QDRANT_URL, embedding, dry_run)
+    logger.info("Neo4j=%s  Qdrant=%s  embedding=%s  llm=%s  dry_run=%s",
+                NEO4J_URI, QDRANT_URL, embedding, llm, dry_run)
 
     n_ok = n_skip = n_fail = n_chunks = 0
     t0 = time.time()
@@ -96,6 +98,8 @@ def run(input_path: Path, config_path: Path, limit: int, offset: int,
                 n_skip += 1
                 continue
             try:
+                if llm:
+                    enrich_incident(ollama, inc)
                 write_incident_to_neo4j(neo4j, inc)
                 if embedding:
                     n_chunks += write_incident_to_qdrant(inc, qdrant, ollama)
@@ -122,9 +126,11 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="extrait sans écrire")
     ap.add_argument("--no-embedding", action="store_true",
                     help="n'écrit pas dans Qdrant (test rapide sans GPU)")
+    ap.add_argument("--with-llm", action="store_true",
+                    help="enrichit chaque incident avec un résumé LLM (llama3.1:8b)")
     args = ap.parse_args()
     return run(args.input, args.config, args.limit, args.offset,
-               args.dry_run, embedding=not args.no_embedding)
+               args.dry_run, embedding=not args.no_embedding, llm=args.with_llm)
 
 
 if __name__ == "__main__":
