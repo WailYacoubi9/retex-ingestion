@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 LLM_MODEL = "llama3.1:8b"
 MAX_CONTEXT_LENGTH = 3000
 
-PROMPT_TEMPLATE = """Tu es un expert en sécurité aéroportuaire. Résume en 3 phrases maximum cet incident de sécurité en français.
-Sois factuel, précis et mentionne les causes identifiées si disponibles.
+PROMPT_TEMPLATE = """Tu es un expert en sécurité aéroportuaire. Résume cet incident en 3 phrases maximum, en français, sans répéter la consigne. Commence directement par le résumé.
 
 Incident : {titre}
 Description : {description}
@@ -52,11 +51,12 @@ def enrich_incident(
 
 def _build_context(inc: IncidentSecuriteV2Canonique) -> Optional[dict]:
     """Construit le contexte textuel. Retourne None si trop peu de contenu."""
-    description = inc.description or inc.detail or ""
-    action = inc.action_corrective or ""
-    causes = " | ".join(filter(None, [
-        inc.desc_cause_1, inc.desc_cause_3, inc.desc_cause_5
-    ]))
+    description = inc.detail or ""
+    action = inc.action_corrective if inc.action_corrective and inc.action_corrective.strip() != "0" else ""
+    causes = " | ".join(filter(
+        lambda x: x and x.strip() not in ("0", ""),
+        [inc.desc_cause_1, inc.desc_cause_3, inc.desc_cause_5]
+    ))
 
     total = len(description) + len(action) + len(causes)
     if total < 50:
