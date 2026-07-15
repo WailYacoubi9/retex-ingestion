@@ -4,6 +4,10 @@ data/
 
 # Scripts d'analyse / debug jetables
 scripts/_*.py
+scripts/audit_entites.py
+
+# Rapports générés
+reports/
 
 # Python
 __pycache__/
