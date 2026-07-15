@@ -16,9 +16,33 @@
 module:
   nom_technique: incident_securite_v2
   libelle: "Incident de sécurité (export plateforme)"
-  source_format: liste_plate
+  label_noeud: IncidentSecu             # label du nœud principal dans le graphe
+  source_format: csv_avec_actions       # une ligne CSV par action → dénormalisé
   cle_identite_label: "Num F.E."        # champ source identité
   cle_identite_canonical: numero_fe     # -> UUID stable
+
+  # Exemples métier pour le moteur de requête générique (few-shot injectés
+  # dans le prompt du parseur — la connaissance domaine vit ICI, pas dans le code).
+  exemples_questions:
+    - "« Combien d'incidents importants ? » → severite = « 3 - important » (importants = échelle 3, PAS faible)"
+    - "« Les incidents graves / élevés » → severite = « 4 - élevé » ; « intolérables » → « 5 - intolérable »"
+    - "« Combien d'incidents sérieux ? » → classification = « Incident sérieux »"
+    - "« Quel est le coût des incidents ? » → intent non_supporte (aucune donnée financière)"
+    - "« Répartition des actions par type » → intent non_supporte (les actions correctives/préventives ont leur propre voie de réponse)"
+    - "« Quel pourcentage d'incidents sont clos ? » → intent repartition, group_by etat (les pourcentages sont calculés automatiquement)"
+    - "« Évolution des incidents FOD entre 2023 et 2025 » → intent repartition, group_by annee, filtres date_evenement >= 2023-01-01 et <= 2025-12-31"
+
+  # Mots qui désignent la fiche en général dans les questions : jamais une
+  # valeur de filtre (le garde-fou du moteur rejette un filtre d'égalité dont
+  # la valeur se réduit à ces mots, sauf mention explicite du champ).
+  synonymes_fiche:
+    - incident
+    - incidents
+    - fiche
+    - fiches
+    - événement
+    - événements
+    - evenement
 
 champs:
 
@@ -323,6 +347,125 @@ champs:
     cle_noeud: login
     relation: VERIFIE_PAR
     description: "Agent vérificateur."
+
+# =============================================================================
+#  ACTIONS — nœuds Action liés à (:IncidentSecu)-[:A_POUR_ACTION]->(:Action)
+#
+#  Modèle : un nœud Action est PARTAGÉ entre plusieurs incidents si
+#  (titre_action + responsable + date_ajout) sont identiques.
+#  Preuve empirique : "diffusion d'une note" (cpluvinage, 08/04/2025)
+#  rattachée à 18 incidents différents avec exactement la même date d'ajout.
+#
+#  Déduplication : MERGE sur (titre_action, responsable, date_ajout).
+#  Relation     : (:IncidentSecu)-[:A_POUR_ACTION {type_action}]->(:Action)
+# =============================================================================
+
+actions:
+  noeud: Action
+  relation: A_POUR_ACTION
+  # Clé de déduplication : même triplet = même nœud partagé entre incidents
+  cle_deduplication:
+    - titre_action
+    - responsable
+    - date_ajout
+
+  champs:
+
+    - cle: type_action
+      label: "type d'action"
+      role: propriete
+      type: texte
+      description: "Catégorie : action corrective / préventive / curative."
+      valeurs_possibles:
+        "action corrective": "Corrige la cause pour éviter la récidive"
+        "action préventive": "Anticipe un risque avant qu'il se produise"
+        "action curative":   "Traite l'urgence immédiate (symptôme)"
+
+    - cle: titre_action
+      label: "titre de l'action"
+      role: propriete
+      type: texte
+      obligatoire: true
+      embedding: true
+      min_length: 5
+      description: "Libellé court de l'action (13.6% des incidents)."
+
+    - cle: detail_action
+      label: "détail"
+      role: propriete
+      type: texte
+      embedding: true
+      min_length: 20
+      filtre_vide: true
+      description: "Description complète de l'action (6.1% rempli)."
+
+    - cle: critere_efficacite
+      label: "Comment sera vérifiée l'efficacité ?"
+      role: propriete
+      type: texte
+      filtre_vide: true
+      description: "Critère de vérification de l'efficacité (1.1% rempli)."
+
+    - cle: responsable_externe
+      label: "resp. externe"
+      role: propriete
+      type: texte
+      filtre_vide: true
+      description: "Responsable hors équipe interne (3.9% rempli)."
+
+    - cle: etat_avancement
+      label: "Etat d'avancement"
+      role: propriete
+      type: texte
+      description: "Avancement en % : 0% / 25% / 50% / 75% / 100% (champ [CHAMP_SUPP])."
+
+    - cle: service_action
+      label: "Service responsable"
+      role: propriete
+      type: texte
+      filtre_vide: true
+      description: "Service propriétaire de l'action (champ [CHAMP_SUPP], 1.8% rempli)."
+
+    - cle: statut
+      label: "statut"
+      role: propriete
+      type: texte
+      description: "Avancement brut : 100 = clôturée, 0 = en cours."
+      valeurs_possibles:
+        "100": "Action clôturée"
+        "0":   "Action en cours"
+
+    # --- Dates ----------------------------------------------------------------
+    - cle: date_ajout
+      label: "date d'ajout"
+      role: date
+      type: horodatage
+      description: "Date de création de l'action (sert à la déduplication)."
+
+    - cle: date_prevue
+      label: "date prévue"
+      role: date
+      type: horodatage
+      description: "Échéance prévue de l'action."
+
+    - cle: date_cloture
+      label: "date de clôture"
+      role: date
+      type: horodatage
+      description: "Date de clôture effective."
+
+    # --- Relation graphe ------------------------------------------------------
+    - cle: responsable
+      label: "responsable"
+      role: relation
+      noeud: Personne
+      cle_noeud: login
+      relation: ACTION_PAR
+      description: "Login du responsable (MERGE sur Personne existante)."
+
+  # Champs [Action] ignorés
+  champs_ignores:
+    - "coût"    # quasi-null (0.1%)
 
 # -----------------------------------------------------------------------------
 #  Champs source ignorés (constantes / quasi-null — cf analyse)
