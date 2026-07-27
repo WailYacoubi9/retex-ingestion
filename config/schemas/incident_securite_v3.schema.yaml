@@ -1,0 +1,725 @@
+# =============================================================================
+#  SCHÉMA — Incident Sécurité v3 (export « évènement sécurité + actions »)
+#
+#  SOURCE DE VÉRITÉ UNIQUE : documente + pilote l'extraction + génère le modèle.
+#    - codegen  : python scripts/codegen_model.py <ce fichier> --out models_incident_securite_v3.py
+#    - extraction : lu au runtime par extractor_incident_securite (même moteur que v2)
+#
+#  Chaque champ a un `role` : propriete | date | flag | relation
+#  + `embedding: true` (+ min_length) sur les textes à vectoriser.
+#  TYPES : texte | entier | decimal | booleen | date | horodatage | heure
+#
+#  Fichier source : aeroportsdelyon_export_evenement_securite_actions_20260721.csv
+#  (127 colonnes ; encodage Latin-1 ; séparateur « ; »). Les `label:` reprennent
+#  le header EXACT de l'export.
+#
+#  NOUVEAUTÉS vs v2 (schéma élargi) :
+#    - Analyse causale « 7 M » (MO / Méthode / Machine / Milieu / Management)
+#      REMPLACE les anciennes desc_cause 1/3/5 (« 5 M »).
+#    - Matrice de risque ÉCLATÉE : Fréquence + Gravité + Risque (code 1E, 2D…)
+#      au lieu d'une sévérité unique.
+#    - 2ᵉ aéronef (collisions / quasi-collisions) : compagnie/type/vol/phase « 2 ».
+#    - Qualification FOD : nature + sous-nature.
+#    - Typologie enrichie : famille + catégorie ECCAIRS (OTHR, ADRM, GCOL…).
+#
+#  Intégration : label_noeud = IncidentSecu (même graphe que v2), identité par
+#  numero_fe → les fiches fusionnent/complètent la base existante.
+# =============================================================================
+
+module:
+  nom_technique: incident_securite_v3
+  libelle: "Incident de sécurité v3 (export évènement + actions)"
+  label_noeud: IncidentSecu             # même label que v2 : intégration dans le graphe existant
+  source_format: csv_avec_actions       # une ligne CSV par action → dénormalisé
+  cle_identite_label: "Num F.E."        # champ source identité (ex. « FNE /26/0190 »)
+  cle_identite_canonical: numero_fe     # -> UUID stable (normaliser l'espace « FNE /26 » → « FNE/26 »)
+
+  # Few-shot métier injectés dans le prompt du parseur (la connaissance domaine
+  # vit ICI). Adaptés à la matrice de risque éclatée et à l'analyse 7 M.
+  exemples_questions:
+    - "« Les incidents importants / de gravité 3 » → gravite = « 3 - Important » (échelle 1 à 4 sur cet export, PAS 1 à 5)"
+    - "« Les incidents graves / élevés » → gravite = « 4 - Élevé »"
+    - "« Incidents fréquents » → frequence = « D - Fréquent » ou « E - Très fréquent » (échelle A→E)"
+    - "« Incidents à risque 3C / 2D » → risque = « 3C » (code = niveau de gravité + lettre de fréquence)"
+    - "« Combien d'incidents sérieux ? » → classification = « Incident sérieux »"
+    - "« Répartition des causes par facteur 7 M » → intent repartition, group_by facteurs_7m"
+    - "« Incidents dont la cause est humaine » → filtre cause_mo non vide (7 M = Main d'œuvre)"
+    - "« Quel est le coût des incidents ? » → intent non_supporte (aucune donnée financière renseignée)"
+    - "« Évolution des FOD entre 2024 et 2026 » → intent repartition, group_by annee, filtres date_evenement"
+
+  synonymes_fiche:
+    - incident
+    - incidents
+    - fiche
+    - fiches
+    - évènement
+    - évènements
+    - evenement
+    - evenements
+
+champs:
+
+  # --- Identité / base ------------------------------------------------------
+  - cle: numero_fe
+    label: "Num F.E."
+    role: propriete
+    type: texte
+    obligatoire: true
+    description: "Référence unique de la fiche (identité). Format « FNE /26/0190 » — normaliser l'espace en « FNE/26/0190 »."
+
+  - cle: titre
+    label: "Titre (ECC)"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 5
+    description: "Titre court de l'évènement."
+
+  - cle: detail
+    label: "Description factuelle de l'évènement (ECC)"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    description: "Narratif factuel principal de l'évènement (rempli à 100%)."
+
+  - cle: type_fiche
+    label: "Type *"
+    role: propriete
+    type: texte
+    description: "Type de fiche (FNE sur tout l'export)."
+
+  - cle: etat
+    label: "État"
+    role: propriete
+    type: texte
+    description: "État de la fiche : Clos / Actif."
+
+  - cle: etape
+    label: "Étape"
+    role: propriete
+    type: texte
+    description: "Étape du workflow : Agir / Analyser / Valider / Identifier."
+
+  - cle: statut_ecc
+    label: "Statut de l'évènement (ECC)"
+    role: propriete
+    type: texte
+    description: "Statut ECCAIRS : « Clos avec analyse sommaire » / « Ouvert, analyse en cours »."
+
+  - cle: aerodrome
+    label: "Nom de l'aérodrome (ECC)"
+    role: propriete
+    type: texte
+    description: "Aérodrome : Lyon Saint-Exupéry ou Lyon Bron."
+
+  - cle: zone
+    label: "Zone"
+    role: propriete
+    type: texte
+    description: "Zone de l'aérodrome (avec le site entre parenthèses, ex. « Parking commercial (LYS) »)."
+
+  - cle: processus
+    label: "processus"
+    role: propriete
+    type: texte
+    description: "Processus interne concerné (ex. « Pilotage > PM2 - Maîtriser… »)."
+
+  - cle: organisations_informees
+    label: "Organisations informées (ECC)"
+    role: propriete
+    type: texte
+    description: "Organisations informées (Exploitant de l'aérodrome | DSAC)."
+
+  # --- Classification & matrice de risque (ÉCLATÉE) -------------------------
+  - cle: gravite
+    label: "Gravité (ECC)"
+    role: propriete
+    type: texte
+    description: "Niveau de gravité (remplace la sévérité v2). Échelle 1 à 4 sur cet export."
+    valeurs_possibles:
+      "1 - Faible": "Gravité faible"
+      "2 - Tolérable": "Gravité tolérable"
+      "3 - Important": "Gravité importante"
+      "4 - Élevé": "Gravité élevée"
+
+  - cle: frequence
+    label: "Fréquence (ECC)"
+    role: propriete
+    type: texte
+    description: "Fréquence estimée de l'occurrence (échelle A → E)."
+    valeurs_possibles:
+      "A - Très rare": "Occurrence très rare"
+      "B - Rare": "Occurrence rare"
+      "C - Occasionnel": "Occurrence occasionnelle"
+      "D - Fréquent": "Occurrence fréquente"
+      "E - Très fréquent": "Occurrence très fréquente"
+
+  - cle: risque
+    label: "Risque"
+    role: propriete
+    type: texte
+    description: "Code de la matrice de risque = niveau de gravité + lettre de fréquence (ex. « 3C », « 2D », « 1E »)."
+
+  - cle: frequence_gravite
+    label: "Fréquence / Gravité"
+    role: propriete
+    type: texte
+    description: "Libellé combiné gravité×fréquence (ex. « [3 - Important][C - Occasionnel] »)."
+
+  - cle: classification
+    label: "Classification de l'évènement (ECC)"
+    role: propriete
+    type: texte
+    description: "Incident / Occurrence sans effet sur la sécurité / Incident sérieux / Accident."
+
+  - cle: consequence
+    label: "Conséquence"
+    role: propriete
+    type: texte
+    description: "Conséquence constatée : Sans effet / Opérationnelle / Dommage avion / etc."
+
+  - cle: origine
+    label: "Origine"
+    role: propriete
+    type: texte
+    description: "Origine de l'évènement : Avion / Assistance en escale / Autre…"
+
+  - cle: condition_lumineuse
+    label: "Période de la journée"
+    role: propriete
+    type: texte
+    description: "Condition lumineuse : Jour / Nuit."
+
+  - cle: famille_type_evenement
+    label: "Famille de type d'évènement"
+    role: propriete
+    type: texte
+    description: "Famille d'évènement (SSLIA, Stationnement aéronef, Autre…)."
+
+  - cle: categorie_type_evenement
+    label: "Catégorie type d'évènement (ECC)"
+    role: propriete
+    type: texte
+    description: "Catégorie ECCAIRS codée : OTHR (Other), ADRM (Aerodrome), GCOL (Ground Collision)…"
+
+  - cle: precision_type_evenement
+    label: "Précisions type évènement"
+    role: propriete
+    type: texte
+    filtre_vide: true
+    description: "Précision libre sur le type d'évènement (contient des « 0 » à filtrer)."
+
+  # --- Narratifs additionnels (embedding, filtrer les '0') ------------------
+  - cle: action_corrective
+    label: "Actions immédiates (ECC)"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    filtre_vide: true
+    description: "Actions immédiates prises pendant l'évènement (massivement « 0 » à filtrer)."
+
+  - cle: analyse_chaud
+    label: "Analyse à chaud"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    filtre_vide: true
+    description: "Analyse terrain immédiate (28% rempli)."
+
+  - cle: detail_analyse
+    label: "Détail de l'analyse (ECC)"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    filtre_vide: true
+    description: "Détail de l'analyse approfondie (19% rempli)."
+
+  - cle: detail_verification
+    label: "Détail de la vérification"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    filtre_vide: true
+    description: "Détail de la vérification d'efficacité (62% rempli)."
+
+  # --- Analyse causale « 7 M » (REMPLACE desc_cause 1/3/5 de v2) ------------
+  - cle: facteurs_7m
+    label: "Facteurs contributifs - 7 M"
+    role: propriete
+    type: texte
+    description: "Facteurs 7 M retenus, séparés par « | » (ex. « Milieu (ECC) | Management (ECC) »). Rempli à 95%."
+
+  - cle: cause_mo
+    label: "7M Detail  - MO"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 10
+    filtre_vide: true
+    description: "Cause « Main d'Œuvre » (facteur humain) rédigée."
+
+  - cle: cause_methode
+    label: "7M Detail  - Methode"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 10
+    filtre_vide: true
+    description: "Cause « Méthode » (procédure) rédigée."
+
+  - cle: cause_machine
+    label: "7M Detail  - Machine"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 10
+    filtre_vide: true
+    description: "Cause « Machine » (matériel/technique) rédigée."
+
+  - cle: cause_milieu
+    label: "7M Detail  - Milieu"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 10
+    filtre_vide: true
+    description: "Cause « Milieu » (environnement, faune, météo) rédigée."
+
+  - cle: cause_management
+    label: "7M Detail  - Management"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 10
+    filtre_vide: true
+    description: "Cause « Management » (organisation, décision) rédigée."
+
+  # --- Localisation & conditions -------------------------------------------
+  - cle: precision_lieu
+    label: "Précision sur le lieu (ECC)"
+    role: propriete
+    type: texte
+    filtre_vide: true
+    description: "Précision libre sur le lieu (ex. « Devant le H14 », « Au niveau d'A3 »). 56% rempli."
+
+  - cle: conditions_meteo
+    label: "Conditions météo"
+    role: propriete
+    type: texte
+    description: "Conditions météo au moment de l'évènement (Bonne visibilité, Forte pluie…). 17% rempli."
+
+  - cle: etat_piste
+    label: "État de la piste"
+    role: propriete
+    type: texte
+    description: "État de la surface de piste (« 6 - Sèche », « 5 - Mouillée [< 3 mm] »). 16% rempli."
+
+  # --- Aéronef & exploitation ----------------------------------------------
+  - cle: type_exploitation
+    label: "Type exploitation (ECC)"
+    role: propriete
+    type: texte
+    description: "Type d'exploitation : Transport public / Aviation de loisir / Militaire."
+
+  - cle: numero_vol
+    label: "Numéro de vol (ECC)"
+    role: propriete
+    type: texte
+    description: "Numéro du vol impliqué (aéronef principal)."
+
+  - cle: immatriculation
+    label: "Immatriculation (ECC)"
+    role: propriete
+    type: texte
+    description: "Immatriculation de l'aéronef principal."
+
+  - cle: concerne_aeronefs
+    label: "l'évènement concerne ou aurait concerné"
+    role: propriete
+    type: texte
+    description: "Éléments concernés (un ou plusieurs aéronefs, véhicules…). 67% rempli."
+
+  - cle: type_materiel
+    label: "Type de matériel"
+    role: propriete
+    type: texte
+    description: "Type de matériel/engin de piste impliqué (Véhicule léger, Escabeau PAX, Tracma…). 15% rempli."
+
+  # --- 2ᵉ aéronef (collisions / quasi-collisions, faible remplissage) -------
+  - cle: compagnie_2
+    label: "Compagnie aérienne 2 (ECC)"
+    role: propriete
+    type: texte
+    description: "Compagnie du 2ᵉ aéronef (collision/quasi-collision). ~2% rempli."
+
+  - cle: type_aeronef_2
+    label: "Type aéronef 2 (ECC)"
+    role: propriete
+    type: texte
+    description: "Type du 2ᵉ aéronef impliqué. ~2% rempli."
+
+  - cle: numero_vol_2
+    label: "Numéro de vol 2 (ECC)"
+    role: propriete
+    type: texte
+    description: "Numéro de vol du 2ᵉ aéronef. ~2% rempli."
+
+  - cle: phase_vol_2
+    label: "Phase de vol 2 (ECC)"
+    role: propriete
+    type: texte
+    description: "Phase de vol du 2ᵉ aéronef. ~2% rempli."
+
+  # --- FOD (qualification) --------------------------------------------------
+  - cle: nature_fod
+    label: "Nature FOD"
+    role: propriete
+    type: texte
+    description: "Nature du FOD : Solide / Liquide. Renseigné sur les fiches FOD (~13%)."
+
+  - cle: sous_nature_fod
+    label: "Sous-nature FOD"
+    role: propriete
+    type: texte
+    description: "Sous-nature du FOD (Débris divers, Hydraulique, Objet aéronautique…)."
+
+  # --- Notification & autres ------------------------------------------------
+  - cle: type_notifiant
+    label: "Type de notifiant"
+    role: propriete
+    type: texte
+    description: "Origine du notifiant : Interne ADL / Externe ADL."
+
+  - cle: precision_notifiant
+    label: "Précision notifiant"
+    role: propriete
+    type: texte
+    filtre_vide: true
+    description: "Précision sur le notifiant (souvent une société : ONET, ALYZIA, SASCA). 33% rempli."
+
+  - cle: autre_precision
+    label: "Autre, préciser :"
+    role: propriete
+    type: texte
+    filtre_vide: true
+    description: "Précision libre quand l'origine/type est « Autre » (Couvre feu, PAXI, Aviaire…)."
+
+  # --- Dates / heures -------------------------------------------------------
+  - cle: date_creation
+    label: "date création"
+    role: date
+    type: horodatage
+    obligatoire: true
+    description: "Date de saisie de la fiche."
+
+  - cle: date_evenement
+    label: "Date de l'évènement (ECC)"
+    role: date
+    type: horodatage
+    obligatoire: true
+    description: "Date réelle de l'évènement."
+
+  - cle: heure_evenement
+    label: "Heure locale de l'évènement (ECC)"
+    role: date
+    type: heure
+    description: "Heure locale de l'évènement (HH:MM:SS)."
+
+  - cle: date_maj
+    label: "Date dernière mise à jour"
+    role: date
+    type: horodatage
+    description: "Date de dernière mise à jour de la fiche."
+
+  - cle: date_verification
+    label: "Date vérification"
+    role: date
+    type: horodatage
+    description: "Date de la vérification d'efficacité (2% rempli)."
+
+  # --- Flags (Oui/Non -> booléen) ------------------------------------------
+  - cle: presence_blesses
+    label: "Y a-t-il des blessés ?"
+    role: flag
+    type: booleen
+    description: "Présence de blessés (Oui -> vrai)."
+
+  - cle: analyse_causes_faite
+    label: "Analyse terminée"
+    role: flag
+    type: booleen
+    description: "L'analyse des causes est-elle terminée."
+
+  - cle: traitement_termine
+    label: "Traitement terminé"
+    role: flag
+    type: booleen
+    description: "Traitement de la fiche terminé."
+
+  - cle: est_significatif
+    label: "Analyse détaillée (Évènement significatif)"
+    role: flag
+    type: booleen
+    description: "Évènement significatif nécessitant une analyse détaillée."
+
+  - cle: arret_manoeuvre
+    label: "Arrêt de la manœuvre"
+    role: flag
+    type: booleen
+    description: "La manœuvre a-t-elle été arrêtée (Oui/Non). 39% rempli."
+
+  - cle: actions_efficaces
+    label: "Actions jugées efficaces"
+    role: propriete
+    type: texte
+    description: "Efficacité des actions : oui / non / sans objet (3 valeurs — pas un booléen)."
+
+  # --- Relations graphe -----------------------------------------------------
+  - cle: type_evenement
+    label: "Type d'évènement (ECC)"
+    role: relation
+    noeud: TypeEvenement
+    cle_noeud: label
+    relation: DE_TYPE
+    description: "Typologie de l'évènement (Baisse de niveau SSLIA, Non-respect…). 29 valeurs."
+
+  - cle: lieu
+    label: "Lieu (ECC)"
+    role: relation
+    noeud: Lieu
+    cle_noeud: label
+    relation: LOCALISE_EN
+    description: "Lieu précis avec le site entre parenthèses (M43 (LYS), TN (LYN)…). 56 valeurs."
+
+  - cle: phase_vol
+    label: "Phase de vol (ECC)"
+    role: relation
+    noeud: PhaseVol
+    cle_noeud: label
+    relation: EN_PHASE_DE_VOL
+    description: "Phase de vol de l'aéronef principal (Stationnement, Push, Décollage…)."
+
+  - cle: compagnie
+    label: "Compagnie aérienne (ECC)"
+    role: relation
+    noeud: Compagnie
+    cle_noeud: nom
+    relation: IMPLIQUE_COMPAGNIE
+    description: "Compagnie aérienne de l'aéronef principal (EASYJET, VOLOTEA…). 53% rempli."
+
+  - cle: type_aeronef
+    label: "Type aéronef (ECC)"
+    role: relation
+    noeud: TypeAeronef
+    cle_noeud: label
+    relation: IMPLIQUE_AERONEF
+    description: "Type d'aéronef principal (A320 / 320, Embraer 190 / E90…)."
+
+  - cle: notifiant
+    label: "Notifiant"
+    role: relation
+    noeud: Notifiant
+    cle_noeud: label
+    relation: NOTIFIE_PAR
+    description: "Catégorie de notifiant (CCO, SSLIA, Assistant en escale…)."
+
+  - cle: societe
+    label: "Société d'assistance en escale"
+    role: relation
+    noeud: Societe
+    cle_noeud: nom
+    relation: CONCERNE
+    description: "Société d'assistance en escale impliquée (ALYZIA, AVIAPARTNER, ONET…). 15% rempli."
+
+  - cle: entite_mise_en_cause
+    label: "Entité mise en cause"
+    role: relation
+    noeud: Entite
+    cle_noeud: nom
+    relation: MIS_EN_CAUSE
+    description: "Entité mise en cause (26% rempli)."
+
+  - cle: service_responsable
+    label: "Service responsable"
+    role: relation
+    noeud: Service
+    cle_noeud: label
+    relation: RESPONSABLE
+    description: "Service responsable du traitement (LYN, OPS Aire de trafic, Infra aéro…). 41% rempli."
+
+  - cle: verificateur
+    label: "Vérificateur"
+    role: relation
+    noeud: Personne
+    cle_noeud: login
+    relation: VERIFIE_PAR
+    description: "Agent vérificateur (format « NOM_x Prenom_x » anonymisé)."
+
+# =============================================================================
+#  ACTIONS — nœuds Action liés à (:IncidentSecu)-[:A_POUR_ACTION]->(:Action)
+#  Même modèle qu'en v2 : nœud Action partagé si (titre_action + responsable +
+#  date_ajout) identiques. Colonnes préfixées [Action] / [CHAMP_SUPP].
+# =============================================================================
+
+actions:
+  noeud: Action
+  relation: A_POUR_ACTION
+  cle_deduplication:
+    - titre_action
+    - responsable
+    - date_ajout
+
+  champs:
+
+    - cle: type_action
+      label: "[Action]type d'action"
+      role: propriete
+      type: texte
+      description: "Catégorie : action corrective / préventive."
+      valeurs_possibles:
+        "action corrective": "Corrige la cause pour éviter la récidive"
+        "action préventive": "Anticipe un risque avant qu'il se produise"
+
+    - cle: titre_action
+      label: "[Action]titre de l'action"
+      role: propriete
+      type: texte
+      obligatoire: true
+      embedding: true
+      min_length: 5
+      description: "Libellé court de l'action (27% des incidents portent une action)."
+
+    - cle: detail_action
+      label: "[Action]détail"
+      role: propriete
+      type: texte
+      embedding: true
+      min_length: 20
+      filtre_vide: true
+      description: "Description complète de l'action (16% rempli)."
+
+    - cle: critere_efficacite
+      label: "[Action]Comment sera vérifiée l'efficacité ?"
+      role: propriete
+      type: texte
+      filtre_vide: true
+      description: "Critère de vérification de l'efficacité (quasi vide sur cet export)."
+
+    - cle: responsable_externe
+      label: "[Action]resp. externe"
+      role: propriete
+      type: texte
+      filtre_vide: true
+      description: "Responsable externe (format « NOM_x Prenom_x » anonymisé). 15% rempli."
+
+    - cle: statut
+      label: "[Action]statut"
+      role: propriete
+      type: texte
+      description: "Avancement brut : 100 = clôturée, 0 = en cours."
+      valeurs_possibles:
+        "100": "Action clôturée"
+        "0":   "Action en cours"
+
+    - cle: service_action
+      label: "[CHAMP_SUPP]Service responsable"
+      role: propriete
+      type: texte
+      filtre_vide: true
+      description: "Service propriétaire de l'action (champ [CHAMP_SUPP]). 12% rempli."
+
+    - cle: etat_avancement
+      label: "[CHAMP_SUPP]Etat d'avancement"
+      role: propriete
+      type: texte
+      description: "Avancement en % : 0% / 25% / 50% / 75% / 100% (champ [CHAMP_SUPP])."
+
+    # --- Dates ----------------------------------------------------------------
+    - cle: date_ajout
+      label: "[Action]date d'ajout"
+      role: date
+      type: horodatage
+      description: "Date de création de l'action (sert à la déduplication)."
+
+    - cle: date_prevue
+      label: "[Action]date prévue"
+      role: date
+      type: horodatage
+      description: "Échéance prévue de l'action."
+
+    - cle: date_cloture
+      label: "[Action]date de clôture"
+      role: date
+      type: horodatage
+      description: "Date de clôture effective de l'action."
+
+    # --- Relation graphe ------------------------------------------------------
+    - cle: responsable
+      label: "[Action]responsable"
+      role: relation
+      noeud: Personne
+      cle_noeud: login
+      relation: ACTION_PAR
+      description: "Login du responsable de l'action (MERGE sur Personne existante)."
+
+  # Champs [Action] ignorés
+  champs_ignores:
+    - "[Action]coût"    # constante à 0
+
+# -----------------------------------------------------------------------------
+#  Champs source ignorés — vides (0%), constantes, ou redondants.
+#  (Profilés sur les 211 lignes de l'export 2026-07-21.)
+# -----------------------------------------------------------------------------
+champs_ignores:
+  # Administratif / constantes
+  - "Unité d'application *"                 # routage administratif (80 variantes)
+  - "Entité responsable (ECC)"              # constante « CRESAE »
+  - "Entité responsable aer (ECC)"          # constante « France - DGAC »
+  - "Langue de l'exposé (ECC)"              # constante « french »
+  - "Méthode de classification (ECC)"       # constante « Méthode interne »
+  - "Type de rapport (ECC)"                 # constante « CRESAE »
+  - "Je souhaite rester anonyme"            # constante « Non »
+  - "Évènement à envoyer à ECCAIRS ?"       # constante « oui »
+  - "Transmettre vers ECCAIRS"              # constante « oui »
+  - "Aéroport"                              # redondant avec « Nom de l'aérodrome (ECC) »
+  - "Notifiant #2"                          # 2ᵉ occurrence (bloc ATM, 2% rempli), renommée par _dedup_headers
+  # Coordonnées brutes / non exploitables
+  - "Localisation"                          # identifiants géo bruts
+  # Colonnes ECC non alimentées par cet export (0%)
+  - "Classe espace aérien (ECC)"
+  - "Type espace aérien (ECC)"
+  - "Contribution MTO (ECC)"
+  - "État/zone de l'évènement (ECC)"
+  - "Nom ANSP (ECC)"
+  - "Précisions conditions météo"
+  - "Type d'installation"
+  - "Effet sur le vol (ECC)"
+  - "Contribution ATM"
+  - "Effet sur l'ATM"
+  - "Type exploitation 2 (ECC)"
+  - "Immatriculation 2 (ECC)"
+  - "Conditions d'éclairage (ECC)"
+  - "Conditions météo (ECC)"
+  - "Quantité de nuages (ECC)"
+  - "Type de phénomène météo (ECC)"
+  - "Visibilité (ECC)"
+  - "Identifiant piste (ECC)"
+  - "Vitesse air (ECC)"
+  - "Altitude avion (ECC)"
+  - "Description de l'espèce (ECC)"
+  - "Pilote informé de la présence aviaire (ECC)"
+  - "Récupération effet sur le vol"
+  - "Parties touchées (ECC)"
+  - "Parties endommagées (ECC)"
+  - "Pourcentage de perte de puissance (ECC)"
+  - "Coût de la réparation (ECC)"
+  - "Temps d'indisponibilité avion (ECC)"
+  - "Récupération type événement aviaire"
+  - "7M Detail  - MP"                       # « Matière/Produit » — 0%
+  - "7M Detail  - Moyen financier"          # 0%
+  - "EISA liée"                             # 0%

@@ -23,6 +23,18 @@ CSV_DELIMITER = ";"
 # Colonnes qui appartiennent à une action (préfixe [Action] ou [CHAMP_SUPP])
 ACTION_PREFIXES = ("[Action]", "[CHAMP_SUPP]")
 
+
+def _dedup_headers(names: list[str]) -> list[str]:
+    """Désambiguïse les headers dupliqués (ex. deux « Notifiant » dans l'export
+    ECCAIRS) : la 1re occurrence garde son nom, les suivantes reçoivent un
+    suffixe « #2 », « #3 »... No-op si aucun doublon (rétro-compatible v2)."""
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for n in names:
+        seen[n] = seen.get(n, 0) + 1
+        out.append(n if seen[n] == 1 else f"{n} #{seen[n]}")
+    return out
+
 # Valeurs considérées comme vides (ne méritent pas d'être stockées)
 EMPTY_VALUES = {
     "", "0", "non", "Non", "NON",
@@ -68,9 +80,11 @@ def _action_key(col: str) -> str:
 
 def csv_to_json(input_path: Path, output_path: Path) -> None:
     with open(input_path, encoding=CSV_ENCODING, newline="") as f:
-        reader = csv.DictReader(f, delimiter=CSV_DELIMITER)
-        all_cols = reader.fieldnames or []
-        rows = list(reader)
+        raw = csv.reader(f, delimiter=CSV_DELIMITER)
+        all_cols = _dedup_headers(next(raw))          # headers dupliqués désambiguïsés
+        # padding : une ligne plus courte que le header -> champs manquants = ""
+        # (DictReader mettait None ; "" est plus sûr pour le nettoyage aval)
+        rows = [dict(zip(all_cols, r + [""] * (len(all_cols) - len(r)))) for r in raw]
 
     incident_cols = [c for c in all_cols if not _is_action_col(c)]
     action_cols   = [c for c in all_cols if _is_action_col(c)]
