@@ -46,3 +46,6 @@ eval_contraint_*.md
 eval_synthese.md
 rapport_resultats.md
 rapport_mesures.md
+
+# Artefacts de compilation LaTeX du rapport : mauvais dépôt, jamais versionnés
+build/
