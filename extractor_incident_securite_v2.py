@@ -161,3 +161,32 @@ def _detecter_test(inc: IncidentSecuriteV2Canonique) -> None:
         if champ and ("{{" in champ or "POSTMAN" in champ.upper()):
             inc.is_test_data = True
             return
+
+
+# Tableaux d'actions dans le payload source (clés structurelles du JSON, pas du schéma).
+_TABLEAUX_ACTIONS = ("actions_correctives", "actions_preventives", "actions_curatives")
+
+
+def titres_actions_du_payload(payload: dict, schema: dict) -> list[str]:
+    """Titres des actions structurées d'une fiche, dédupliqués, ordre préservé.
+
+    Parcourt les TROIS tableaux (corrective / préventive / curative — ne pas se
+    limiter au 1ᵉʳ, sinon les 532 préventives sont perdues). Le libellé du titre
+    est lu depuis le schéma (`actions.champs`, cle=titre_action). Dédup intra-fiche :
+    un nœud :Action partagé peut apparaître deux fois -> gonflerait le tf du chunk.
+    """
+    label = "titre de l'action"
+    for c in schema.get("actions", {}).get("champs", []):
+        if c.get("cle") == "titre_action":
+            label = c.get("label", label)
+            break
+
+    titres: list[str] = []
+    for tableau in _TABLEAUX_ACTIONS:
+        for action in (payload.get(tableau) or []):
+            if not isinstance(action, dict):
+                continue
+            titre = str(action.get(label) or "").strip()
+            if titre and titre not in titres:
+                titres.append(titre)
+    return titres

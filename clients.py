@@ -7,6 +7,7 @@ API alignee sur les modules v2 (loader.py, llm_enricher.py, retrieval.py).
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Optional
 
 import httpx
@@ -18,7 +19,9 @@ from qdrant_client.http.models import (
 
 logger = logging.getLogger(__name__)
 
-INCIDENT_CHUNKS_COLLECTION = "incident_chunks"
+# Collection Qdrant configurable par env (défaut = prod). Permet un A/B en collection
+# séparée (ex. QDRANT_COLLECTION=incident_chunks_v2b) sans toucher l'index live.
+INCIDENT_CHUNKS_COLLECTION = os.environ.get("QDRANT_COLLECTION", "incident_chunks")
 EMBEDDING_DIM = 1024  # bge-m3
 
 
@@ -77,19 +80,33 @@ class QdrantWrapper:
                 INCIDENT_CHUNKS_COLLECTION, field_name, field_schema="keyword",
             )
 
+    def recreate_collection(self):
+        """Supprime puis recree la collection (meme dimension, meme index).
+
+        Necessaire avant une re-ingestion qui change le nombre ou les ids des points :
+        les nouveaux point_id ne recouvrent pas les anciens (field_canonical passe de
+        champ a 'fiche'/'narratif_long'), donc sans suppression l'index melangerait
+        ancien et nouveau. ensure_collection() seul ne recree pas si elle existe deja.
+        """
+        existing = {c.name for c in self._client.get_collections().collections}
+        if INCIDENT_CHUNKS_COLLECTION in existing:
+            logger.info("Deleting Qdrant collection: %s", INCIDENT_CHUNKS_COLLECTION)
+            self._client.delete_collection(INCIDENT_CHUNKS_COLLECTION)
+        self.ensure_collection()
+
     def upsert(self, point_id: str, vector: list[float], payload: dict) -> None:
         """Upsert d'un seul point."""
         point = PointStruct(id=point_id, vector=vector, payload=payload)
         self.upsert_points([point])
 
-    def upsert_points(self, points: list[PointStruct]) -> None:
-        """Upsert d'un batch de points."""
+    def upsert_points(self, points: list[PointStruct], wait: bool = True) -> None:
+        """Upsert d'un batch de points. `wait` synchronise l'écriture (défaut)."""
         if not points:
             return
         self._client.upsert(
             collection_name=INCIDENT_CHUNKS_COLLECTION,
             points=points,
-            wait=True,
+            wait=wait,
         )
 
     def search(

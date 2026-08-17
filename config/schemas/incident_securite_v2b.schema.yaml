@@ -1,0 +1,813 @@
+# =============================================================================
+#  SCHÉMA — Incident Sécurité v2b (export plateforme intra'know)
+#
+#  SOURCE DE VÉRITÉ UNIQUE : documente + pilote l'extraction + génère le modèle.
+#    - codegen    : python scripts/codegen_model.py config/schemas/incident_securite_v2b.schema.yaml \
+#                          --out models_incident_securite_v2b.py
+#    - extraction : lu au runtime par extractor_incident_securite_v2.py
+#                   (matching label -> clé source EXACT : payload.get(label),
+#                    aucune normalisation — chaque `label:` est byte-exact.)
+#
+#  POURQUOI v2b PLUTÔT QUE v2
+#  Le v2 déclarait 43 champs et en ignorait 12, sur 96 colonnes scalaires : 45
+#  colonnes n'étaient NI ingérées NI déclarées ignorées — elles n'existaient
+#  nulle part dans le système, sans trace de décision.
+#
+#  Le v2b arbitre les 96, sur une mesure et non au jugé :
+#      utilité = taux de remplissage × entropie normalisée
+#  (l'information réellement disponible : un champ rempli à 100 % mais toujours
+#  égal à la même valeur n'apprend rien ; un champ riche mais vide non plus).
+#
+#  RÈGLE D'ARBITRAGE
+#      utilité > 0,30                       -> ingéré
+#      0,05 – 0,30 + sens métier clair      -> ingéré
+#      < 0,05 ou modalité unique            -> ignoré, AVEC le motif
+#  Les booléens échappent à la règle : leur entropie se mesure sur le taux de
+#  remplissage, pas sur les valeurs (toutes égales à « Oui »).
+#
+#  LIMITE DU MÉTRIQUE (assumée) — fill×entropie mesure l'information STATISTIQUE,
+#  pas la valeur de DÉCISION. Il a un angle mort dans les DEUX sens, corrigé à la
+#  main ici :
+#    - basse entropie / haute valeur : `type_fiche` (entropie 0,04) est la SEULE
+#      partition sécurité / sûreté / AFIS -> GARDÉ contre le métrique.
+#    - haute utilité / valeur nulle : `Date de vérification` (utilité 0,91) est une
+#      date technique auto-remplie -> IGNORÉ contre le métrique.
+#  Le tri automatique est un premier passage, pas l'arbitre.
+#
+#  PRINCIPAUX CHANGEMENTS vs v2
+#    + precisions_lieu    (97,5 % rempli, utilité 0,75 — 2ᵉ champ analytique du
+#                          corpus, était absent)
+#    + unite_application  (100 % rempli, 71 valeurs réelles, était absent)
+#    + les 6 axes causaux nommés : le v2 n'ingérait que desc_cause 1/3/5, soit
+#                          875 fiches de texte causal perdues (Méthode 406 + MP 17
+#                          + Management 452), dont 519 dont la seule cause rédigée
+#                          était invisible
+#    + facteur_* : les 6 cases 7M comme booléens (aucune n'était ingérée)
+#    + immatriculation, numero_vol, concerne, type_materiel, autre_compagnie,
+#      type_evenement_autre, report_type, bloc aéronef 2
+#    ~ type_fiche : CONSERVÉ (v2 le déclarait) mais requalifié — non pas « FNE à
+#      99 % » mais la partition sécurité/sûreté/AFIS (cf. LIMITE DU MÉTRIQUE)
+#    - analyse_causes_faite : valeur par défaut de 2008 à 2016 (100 % « Oui »,
+#      100 % sans aucune cause). Le champ ne mesure rien, il induit en erreur.
+#    - traitement_termine   : doublon exact de `Étape = Valider (Terminé)`
+#    - Date de vérification : haute utilité mesurée mais date technique creuse
+#    - processus, organisations_informees, statut_ecc, categorie_id
+#      : quasi-constants ou doublons incohérents
+#
+#  Les `label:` reprennent le header EXACT de l'export v2.
+# =============================================================================
+
+module:
+  nom_technique: incident_securite_v2   # identité de module STABLE (pas v2b) : conserve
+                                        # SOURCE_MODULE, incident_id, classe et filtre API.
+                                        # « v2b » est le nom de FICHIER, pas du module.
+  libelle: "Incident de sécurité (export plateforme, schéma arbitré)"
+  label_noeud: IncidentSecu
+  source_format: csv_avec_actions
+  cle_identite_label: "Num F.E."
+  cle_identite_canonical: numero_fe
+
+  exemples_questions:
+    - "« Combien d'incidents importants ? » → severite = « 3 - important » (importants = échelle 3, PAS faible)"
+    - "« Les incidents graves / élevés » → severite = « 4 - élevé » ; « intolérables » → « 5 - intolérable »"
+    - "« Combien d'incidents sérieux ? » → classification = « Incident sérieux »"
+    - "« Les incidents de sûreté / SURT » → type_fiche = « FNE SURT » ; une analyse safety par défaut filtre type_fiche = « FNE »"
+    - "« Sur la 36L », « au poste C83 », « en D63 » → precisions_lieu (point exact) ; « sur la piste » → lieu (macro-zone)"
+    - "« Incidents dont la cause est humaine » → cause_mo non vide ; « organisationnelle » → cause_methode ou cause_management"
+    - "« Incidents impliquant Aviapartner » → societe, entite_mise_en_cause OU unite_application (l'entité est éparpillée)"
+    - "« Quel est le coût des incidents ? » → intent non_supporte (aucune donnée financière)"
+    - "« Combien d'incidents sans blessé ? » → intent non_supporte : la source ne contient AUCUN « Non ». On ne peut constater qu'une absence de saisie."
+    - "« Répartition des actions par type » → intent non_supporte (les actions ont leur propre voie)"
+    - "« Quel pourcentage d'incidents sont clos ? » → intent repartition, group_by etat"
+    - "« Évolution des incidents FOD entre 2023 et 2025 » → intent repartition, group_by annee, date_evenement >= 2023-01-01 et <= 2025-12-31"
+
+  synonymes_fiche:
+    - incident
+    - incidents
+    - fiche
+    - fiches
+    - événement
+    - événements
+    - evenement
+
+champs:
+
+  # ═══ Identité & narratifs ══════════════════════════════════════════════════
+  - cle: numero_fe
+    label: "Num F.E."
+    role: propriete
+    type: texte
+    obligatoire: true
+    description: "Référence unique de la fiche (identité). Format : FNE/AA/NNNN."
+
+  - cle: titre
+    label: "titre"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 5
+    description: "Titre court. ATTENTION : 2 554 fiches (28 %) partagent un titre strictement identique avec au moins 9 autres — il ne suffit jamais à identifier une fiche."
+
+  - cle: detail
+    label: "Description de l'événement et de son contexte"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    description: "Narratif principal. Rempli 99,4 %, médiane 122 caractères. Utilité 0,99 — le meilleur champ du corpus."
+
+  # ═══ Classification ════════════════════════════════════════════════════════
+  - cle: severite
+    label: "classification des risques (ECC)"
+    role: propriete
+    type: texte
+    description: "Niveau de risque ECCAIRS. Rempli 99,8 %, utilité 0,63."
+    valeurs_possibles:
+      "1 - faible": "Risque faible"
+      "2 - tolérable": "Risque tolérable"
+      "3 - important": "Risque important"
+      "4 - élevé": "Risque élevé"
+      "5 - intolérable": "Risque intolérable"
+
+  - cle: classification
+    label: "classification événement (ECC)"
+    role: propriete
+    type: texte
+    description: "Incident / Occurrence sans effet / Incident sérieux / Accident. Utilité 0,58."
+
+  - cle: etape
+    label: "Étape"
+    role: propriete
+    type: texte
+    description: "Workflow : Valider (Terminé) / Agir / Analyser / Identifier. Utilité 0,52 — seul champ d'état réellement discriminant (État et Statut ECC sont quasi-constants)."
+
+  - cle: etat
+    label: "État"
+    role: propriete
+    type: texte
+    description: "Clos 98,4 % / Actif 1,2 % / Classé sans suite 0,5 %. Utilité 0,08 : conservé pour écarter les fiches non closes, JAMAIS comme dimension d'analyse."
+
+  - cle: condition_lumineuse
+    label: "Lors de l'évènement, il faisait"
+    role: propriete
+    type: texte
+    description: "Jour / Nuit. Rempli 47,1 %, entropie 0,73 — booléen bien équilibré, très discriminant."
+
+  - cle: aerodrome
+    label: "nom de l'aérodrome (ECC)"
+    role: propriete
+    type: texte
+    description: "LYS 94,7 % / Lyon Bron 5,3 %. Conservé pour isoler Bron ; à NE PAS verbaliser dans le chunk (quasi-constant)."
+
+  - cle: report_type
+    label: "report type (ECC)"
+    role: propriete
+    type: texte
+    description: "Marqueur de format de rapport, 2 modalités, rempli 59 %. Sert à distinguer les fiches CRESAE des fiches legacy — utile pour borner un périmètre, pas pour analyser."
+
+  - cle: type_fiche
+    label: "type *"
+    role: propriete
+    type: texte
+    description: >
+      Domaine de la fiche. CONSERVÉ malgré une entropie de 0,04 (98,6 % « FNE »)
+      car c'est le SEUL champ qui partitionne le corpus :
+      « FNE » sécurité/safety (9 060) · « FNE SURT » SÛRETÉ / malveillance,
+      intrusion, bagage suspect (95) · « AFIS » régime Lyon-Bron (28) ·
+      rares « CSA » (4) / « LRST » (2) / « SGS » (1) / « RETEX » (1).
+      Le métrique fill×entropie voudrait l'ignorer — c'est son angle mort sur les
+      catégories rares mais structurantes (même logique qui garde aerodrome/Bron).
+      Une analyse « safety » doit filtrer type_fiche = « FNE » (défaut) pour ne pas
+      mélanger 95 événements de sûreté. À NE PAS verbaliser dans le chunk.
+      MÉTIER (Hugo) : séparation sécurité / sûreté explicitement demandée.
+
+  # ═══ Localisation ══════════════════════════════════════════════════════════
+  - cle: precisions_lieu
+    label: "précisions sur le lieu (ECC)"
+    role: propriete
+    type: texte
+    description: >
+      Point exact : « 35L », « 36L - MAN », « C83 », « D63 », « AD ». Rempli 97,5 %,
+      utilité 0,75 — 2ᵉ champ analytique du corpus, ABSENT du v2.
+      C'est le vocabulaire réel des agents SGS : personne ne dit « sur la piste »,
+      on dit « sur la 36L ».
+      ATTENTION, texte libre malgré le taux : 1 997 valeurs distinctes dont 70 %
+      d'hapax, et 204 clés ont plusieurs graphies (« 36L - MAN » 300 / « 36L - man »
+      143 = deux valeurs aujourd'hui). Normalisation de casse INDISPENSABLE.
+      Un parsing (piste 35L/36R… ; poste C83/D63…) récupère ~74 % des valeurs ;
+      les 26 % restants sont du texte libre non structurable.
+
+  # ═══ Analyse causale — 6 axes nommés ═══════════════════════════════════════
+  # Mapping position -> axe VÉRIFIÉ sur le corpus par co-occurrence case cochée /
+  # texte rédigé (mesuré 2026-08-05). Co-occurrence quasi-parfaite :
+  #   - Management : EXACT — 452 cases, 452 textes, 452 ∩, 0 discordance.
+  #   - Milieu (849 textes) et Matières premières (17) : 0 texte sans case.
+  #   - Fuites résiduelles « texte sans case » : MO 31, Méthode 3, Machine 1.
+  # Le mapping position->axe reste validé par le recouvrement écrasant
+  # (MO 1577/1608, Méthode 403/406, Machine 991/992). Les cases cochées SANS texte
+  # sont normales (axe retenu sans rédaction). Le v2 n'ingérait que 1, 3 et 5 :
+  # 875 fiches de texte causal (Méthode 406 + MP 17 + Management 452) perdues.
+  # `desc cause 7` (Moyens financiers) : 0 fiche sur 9 191 — 7ᵉ M jamais utilisé.
+  # MÉTIER (Hugo) : l'analyse causale doit se fonder sur les 7M — cases cochées
+  # (facteur_*) + détails rédigés (cause_*). Approche confirmée.
+
+  - cle: cause_mo
+    label: "desc cause 1"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    description: "Cause « Main d'œuvre » (facteur humain). 1 608 fiches, médiane 66 car."
+
+  - cle: cause_methode
+    label: "desc cause 2"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    description: "Cause « Méthodes » (procédure). 406 fiches, médiane 101 car — le texte causal LE PLUS RICHE du corpus, absent du v2."
+
+  - cle: cause_machine
+    label: "desc cause 3"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    description: "Cause « Machines / équipement ». 992 fiches, médiane 41 car."
+
+  - cle: cause_mp
+    label: "desc cause 4"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    description: "Cause « Matières premières ». 17 fiches — marginal mais complète l'axe."
+
+  - cle: cause_milieu
+    label: "desc cause 5"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    description: "Cause « Milieu » (environnement, faune, météo). 849 fiches, médiane 28 car."
+
+  - cle: cause_management
+    label: "desc cause 6"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 15
+    description: "Cause « Management » (organisation, décision). 452 fiches, absent du v2."
+
+  # Les 6 cases à cocher. Aucune n'était ingérée. Leur entropie apparente est
+  # nulle (toujours « Oui ») mais l'information est BINAIRE : cochée / non cochée.
+  # Entropie binaire réelle : 0,68 pour Main d'œuvre. 4 065 fiches (44,2 %) portent
+  # au moins un axe. Permet « incidents liés à un facteur humain » sans filtre.
+  - cle: facteur_mo
+    label: "Main d’œuvre"
+    role: flag
+    type: booleen
+    description: "Axe causal Main d'œuvre retenu. 17,9 % des fiches."
+
+  - cle: facteur_methode
+    label: "Méthodes"
+    role: flag
+    type: booleen
+    description: "Axe causal Méthodes retenu. 4,8 %."
+
+  - cle: facteur_machine
+    label: "Machines (équipement)"
+    role: flag
+    type: booleen
+    description: "Axe causal Machines retenu. 12,2 %."
+
+  - cle: facteur_mp
+    label: "Matières premières"
+    role: flag
+    type: booleen
+    description: "Axe causal Matières premières retenu. 0,2 %."
+
+  - cle: facteur_milieu
+    label: "Milieu"
+    role: flag
+    type: booleen
+    description: "Axe causal Milieu retenu. 10,8 %."
+
+  - cle: facteur_management
+    label: "Management"
+    role: flag
+    type: booleen
+    description: "Axe causal Management retenu. 4,9 %."
+
+  # ═══ Narratifs d'analyse & d'action ════════════════════════════════════════
+  - cle: action_corrective
+    label: "Action corrective immédiate"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    filtre_vide: true
+    description: >
+      Action prise pendant l'événement. Rempli 36,8 %, médiane 46 car, utilité 0,34.
+      34 % font 4 mots ou moins (« ramassé », « TWR avisée ») et 53 % contiennent
+      au moins un sigle interne — peu transférable hors ADL sans glossaire.
+
+  - cle: premiere_analyse_terrain
+    label: "Analyse à chaud"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    filtre_vide: true
+    description: >
+      Première analyse rédigée par l'agent au moment de l'événement, avant
+      instruction complète. C'est un CONSTAT, pas une action — ne pas confondre
+      avec action_corrective. Renommé depuis `analyse_chaud`, dont le libellé
+      était opaque pour un LLM. Rempli 15,3 %, médiane 79 car, entropie 1,00.
+
+  - cle: detail_verification
+    label: "détail de la vérification"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 20
+    filtre_vide: true
+    description: "Détail de la vérification d'efficacité. Rempli 25,2 %, médiane 52 car."
+
+  - cle: type_evenement_autre
+    label: "Type d'événement (autre)"
+    role: propriete
+    type: texte
+    embedding: true
+    min_length: 10
+    description: >
+      Précision libre quand le type vaut « Autre, précisez : » (2ᵉ modalité du
+      corpus, 1 902 fiches). Rempli sur 1 279 d'entre elles, 576 valeurs distinctes.
+      Absent du v2 : 6,8 % du corpus était donc indexé sans type exploitable.
+      Gisement du cas d'usage « reclassification par LLM ».
+
+  # ═══ Aéronef & exploitation ════════════════════════════════════════════════
+  - cle: immatriculation
+    label: "immatriculation [F-XXXX] (ECC)"
+    role: propriete
+    type: texte
+    description: >
+      Seule clé stable d'identification d'un appareil (« cet avion a-t-il déjà été
+      impliqué ? »). Rempli 28,1 %, 1 812 valeurs, entropie 0,98.
+      Format incohérent (F-GZHX / FGLNK / DT-SRW) : normaliser en supprimant le
+      tiret, sinon un même appareil crée deux nœuds. Donnée quasi-identifiante -> RGPD.
+
+  - cle: numero_vol
+    label: "N° de vol (ECC)"
+    role: propriete
+    type: texte
+    description: "Numéro du vol. Rempli 22 %, formats hétérogènes (6374 / AF6145 / EJU4445). Peu de valeur analytique propre, mais clé de jointure vers un système externe."
+
+  - cle: concerne
+    label: "l'évènement concerne ou aurait concerné"
+    role: propriete
+    type: texte
+    description: "Objet concerné (aéronef / véhicule / personne). Rempli 39,9 %, 3 modalités réelles après split, entropie 0,74. Multi-valué : séparateur « | »."
+
+  - cle: type_materiel
+    label: "type de matériel"
+    role: propriete
+    type: texte
+    description: "Engin ou matériel de piste impliqué. Rempli 10,2 %, 396 valeurs, entropie 0,88."
+
+  - cle: type_installation
+    label: "type d'installation"
+    role: propriete
+    type: texte
+    description: "Installation concernée. Rempli 3,4 %, 208 valeurs. Marginal mais bien discriminant quand présent."
+
+  - cle: autre_compagnie
+    label: "autre compagnie"
+    role: propriete
+    type: texte
+    description: >
+      Compagnie hors liste ECCAIRS, texte libre. Rempli 9,2 %, 145 valeurs — mais
+      contient les MÊMES compagnies que le champ codé (« Easyjet Airline Company Ltd »
+      100×, « Air France » 50×). Résolution d'entités OBLIGATOIRE entre les deux,
+      sinon « incidents impliquant Easyjet » est faux. Couverture combinée : 33 %.
+
+  # --- Bloc « aéronef 2 » : 155 fiches (1,7 %), mais ce sont les collisions et
+  # --- quasi-collisions, donc les événements les plus graves du corpus.
+  - cle: compagnie_2
+    label: "la compagnie (aéronef 2/ECC)"
+    role: propriete
+    type: texte
+    description: "Compagnie du 2ᵉ aéronef. 1,4 %."
+
+  - cle: type_aeronef_2
+    label: "type d'aéronef (aéronef 2/ECC)"
+    role: propriete
+    type: texte
+    description: "Type du 2ᵉ aéronef. 0,8 %."
+
+  - cle: numero_vol_2
+    label: "N° de vol (aéronef 2/ECC)"
+    role: propriete
+    type: texte
+    description: "Vol du 2ᵉ aéronef. 1,4 %."
+
+  - cle: phase_vol_2
+    label: "phase de vol (aéronef 2/ECC)"
+    role: propriete
+    type: texte
+    description: "Phase de vol du 2ᵉ aéronef. 1,4 %."
+
+  - cle: conditions_meteo
+    label: "conditions météorologiques"
+    role: propriete
+    type: texte
+    description: "Conditions météo. Rempli 1 %, 55 valeurs — trop peu couvert pour une analyse, conservé comme contexte de la fiche."
+
+  # ═══ Dates ═════════════════════════════════════════════════════════════════
+  - cle: date_creation
+    label: "Date"
+    role: date
+    type: horodatage
+    obligatoire: true
+    description: "Date de saisie de la fiche."
+
+  - cle: date_evenement
+    label: "date de l'évènement (ECC)"
+    role: date
+    type: horodatage
+    obligatoire: true
+    description: "Date réelle de l'événement. C'est CE champ qui fait foi pour toute question temporelle, jamais date_creation. 2 fiches portent l'année 0000."
+
+  - cle: heure_evenement
+    label: "heure locale de l'évènement (ECC)"
+    role: date
+    type: heure
+    description: "Heure locale. Rempli 63,9 % — permet les analyses par tranche horaire."
+
+  - cle: date_maj
+    label: "Date dernière mise à jour"
+    role: date
+    type: horodatage
+    description: "Dernière mise à jour de la fiche."
+
+  # ═══ Booléens ══════════════════════════════════════════════════════════════
+  # RÈGLE ABSOLUE : ces champs n'ont PAS d'état « Non ». Une case vide signifie
+  # « non renseigné », jamais « non ». L'extracteur laisse la propriété ABSENTE
+  # (et non `false`) ; le moteur de requête doit compiler `IS NULL`, jamais
+  # `= false`, et le phrasage ne doit jamais conclure une négation d'une absence.
+  - cle: presence_blesses
+    label: "Y a-t-il des blessés ?"
+    role: flag
+    type: booleen
+    description: >
+      Rempli sur 59 fiches (0,6 %). Les 4 modalités sont « Ne sais pas » 38,
+      « Oui : le personnel » 13, « Oui, les passagers » 7, « Oui » 1.
+      AUCUN « Non » n'existe dans tout le corpus.
+      MÉTIER (Hugo) : gisement de retraitement / vérification des saisies ; une case
+      vide = « non renseigné », jamais « non ».
+
+  - cle: est_significatif
+    label: "Analyse détaillée (ev. significatif)"
+    role: flag
+    type: booleen
+    description: >
+      Événement significatif nécessitant une analyse détaillée. 0,9 %.
+      MÉTIER (Hugo) : jugement de valeur de l'analyste ; déclencheur à clarifier avec Sixtine.
+
+  - cle: est_rex
+    label: "REX"
+    role: flag
+    type: booleen
+    description: >
+      Fiche marquée retour d'expérience. 0,2 %.
+      MÉTIER (Hugo) : marquage quasi abandonné, remplacé par les fiches de type RETEX
+      (à confirmer avec Sixtine).
+
+  - cle: actions_efficaces
+    label: "actions jugées efficaces"
+    role: flag
+    type: booleen
+    description: >
+      Efficacité constatée. Rempli 7,7 %, modalité unique « oui ».
+      Il est donc IMPOSSIBLE de répondre « quelles actions ont été inefficaces » :
+      la source ne trace aucune inefficacité. Réponse attendue : abstention.
+      MÉTIER (Hugo) : le « oui » juge les actions de l'onglet Agir si présentes, sinon la
+      réponse à chaud — il ne porte pas sur l'ensemble des actions.
+
+  # ═══ Relations graphe ══════════════════════════════════════════════════════
+  # Normalisation OBLIGATOIRE de la clé de fusion (casse, accents, espaces,
+  # ponctuation), la graphie d'origine étant conservée en propriété d'affichage.
+  # Sans elle : Aviapartner existe en 4 nœuds, Alyzia en 3, ONET en 2, et
+  # « incidents impliquant Alyzia » renvoie 170 fiches au lieu de 737.
+  # NE PAS faire de fermeture transitive ni de clustering : normalisation
+  # lexicale déterministe + table d'alias validée métier, rien de plus.
+
+  - cle: type_evenement
+    label: "type d'événement (ECC)"
+    role: relation
+    noeud: TypeEvenement
+    cle_noeud: label
+    relation: DE_TYPE
+    description: >
+      Typologie (28 modalités réelles après split « | »). Rempli 99,8 %, utilité 0,73.
+      Top 3 = 60 % du corpus (FOD 2 001, Autre 1 902, Collision aviaire 1 691).
+      ATTENTION au filtrage : « collision » capture 6 types (2 672 fiches au lieu
+      de 1 691) et « aire » en capture 2 006 car c'est une sous-chaîne de « aviaire ».
+      Résolution sur le catalogue puis égalité stricte, jamais CONTAINS.
+
+  - cle: lieu
+    label: "lieu de l'évènement (ECC)"
+    role: relation
+    noeud: Lieu
+    cle_noeud: label
+    relation: LOCALISE_EN
+    description: >
+      Macro-zone : Piste 26,7 %, Parking avions 23,3 %, Autre 13,7 %, Aire de
+      trafic 6,7 %, Voie de circulation 3,4 %, Proximité aérodrome 1,7 %, Route de
+      service 0,8 %. Rempli 76,3 % — null à 100 % avant 2013, le champ a été
+      introduit vers cette date. Complémentaire de precisions_lieu, pas redondant :
+      2 148 fiches ont le point précis SANS la macro-zone (l'inverse : 204).
+
+  - cle: unite_application
+    label: "Unité d'application *"
+    role: relation
+    noeud: Unite
+    cle_noeud: label
+    relation: CONCERNE_UNITE
+    description: >
+      Rempli 100 %, 71 valeurs réelles après split (631 chaînes brutes), utilité 0,50.
+      ABSENT du v2. Multi-valué sur 5 319 fiches (57,9 %).
+      Dominé par le routage administratif (ADL_LYS 8 642, DSAC-Ce 5 197) mais
+      contient aussi de la vraie information d'acteur : Aviapartner 758,
+      G3S / Alyzia 707, EC - Easyjet 562. C'est la meilleure source d'acteurs du
+      corpus, loin devant `nom de la société` (9,7 %).
+
+  - cle: notifiant
+    label: "Notifiant"
+    role: relation
+    noeud: Notifiant
+    cle_noeud: label
+    relation: NOTIFIE_PAR
+    description: >
+      Rempli 94,7 %, 36 modalités, utilité 0,60.
+      CE N'EST PAS UNE PERSONNE : ce sont des fonctions et des organisations
+      (CCO, SSLIA, Agent aire de trafic, Compagnies aériennes, SNA). Contrairement
+      à emetteur/verificateur, il PEUT être filtré et agrégé sans enfreindre la
+      culture juste. Réserve : la 1ʳᵉ modalité est « Autres » à 33,7 %.
+
+  - cle: phase_vol
+    label: "phase de vol (ECC)"
+    role: relation
+    noeud: PhaseVol
+    cle_noeud: label
+    relation: EN_PHASE_DE_VOL
+    description: "Stationnement, Atterrissage, Décollage, Roulage, Tractage… Rempli 26,2 %, entropie 0,84 — le champ le plus discriminant du corpus. Bon candidat à l'inférence LLM depuis la description."
+
+  - cle: compagnie
+    label: "la compagnie (ECC)"
+    role: relation
+    noeud: Compagnie
+    cle_noeud: nom
+    relation: IMPLIQUE_COMPAGNIE
+    description: "Compagnie exploitante, liste ECCAIRS (46 modalités). Rempli 23,9 %. À résoudre avec autre_compagnie. Filtrage : « air » capture 22 compagnies (713 fiches) au lieu de 270 pour AIR France."
+
+  - cle: type_aeronef
+    label: "type d'aéronef (ECC)"
+    role: relation
+    noeud: TypeAeronef
+    cle_noeud: label
+    relation: IMPLIQUE_AERONEF
+    description: "A320, A319, B737-800… Rempli 23,8 %, 51 valeurs."
+
+  - cle: societe
+    label: "nom de la société"
+    role: relation
+    noeud: Societe
+    cle_noeud: nom
+    relation: CONCERNE
+    description: "Prestataire impliqué. Rempli 9,7 %, 141 valeurs. Redondant avec entite_mise_en_cause et unite_application : la MÊME entité est éparpillée sur 4 champs. La résolution doit porter sur les 4 simultanément."
+
+  - cle: entite_mise_en_cause
+    label: "Entité mise en cause"
+    role: relation
+    noeud: Entite
+    cle_noeud: nom
+    relation: MIS_EN_CAUSE
+    description: "Entité mise en cause. Rempli 8,9 %, 151 valeurs. Cf. remarque sur societe."
+
+  - cle: service_responsable
+    label: "Service responsable"
+    role: relation
+    noeud: Service
+    cle_noeud: label
+    relation: RESPONSABLE
+    description: "Service en charge du traitement. Rempli 1,9 % (177 fiches) — plafond très bas, à annoncer dans toute réponse s'appuyant dessus."
+
+  # --- PII : ingérés pour la traçabilité, JAMAIS exposés en filtre ni en
+  # --- classement (culture juste). Le moteur de requête doit les exclure de
+  # --- _RELATIONS et de _REL_DIMS.
+  - cle: emetteur
+    label: "emetteur"
+    role: relation
+    noeud: Personne
+    cle_noeud: login
+    relation: EMIS_PAR
+    description: "Login nominatif de l'agent émetteur. PII — non interrogeable."
+
+  - cle: verificateur
+    label: "Vérificateur"
+    role: relation
+    noeud: Personne
+    cle_noeud: login
+    relation: VERIFIE_PAR
+    description: "Login nominatif de l'agent vérificateur. PII — non interrogeable. 13 personnes sont à la fois émetteur et vérificateur (équipe SGS)."
+
+# =============================================================================
+#  ACTIONS — (:IncidentSecu)-[:A_POUR_ACTION {type_action}]->(:Action)
+#
+#  Un nœud Action est PARTAGÉ entre incidents si (titre_action + responsable +
+#  date_ajout) sont identiques. Preuve : « diffusion d'une note » (même responsable,
+#  08/04/2025) rattachée à 18 incidents avec la même date d'ajout.
+#
+#  Plafond à connaître : 1 300 actions sur 949 fiches seulement (10,3 %), dont
+#  3 curatives. 916 titres distincts, médiane 5 mots, 42 % font ≤ 4 mots.
+#  Titres dominants : « rappel aux équipes » 84×, « diffusion d'une note » 41×.
+#  Toute voie de recommandation doit annoncer ce plafond plutôt que généraliser.
+# =============================================================================
+
+actions:
+  noeud: Action
+  relation: A_POUR_ACTION
+  cle_deduplication:
+    - titre_action
+    - responsable
+    - date_ajout
+
+  champs:
+
+    - cle: type_action
+      label: "type d'action"
+      role: propriete
+      type: texte
+      description: >
+        Corrective 765 / préventive 532 / curative 3.
+        MÉTIER (Hugo) : la catégorie « curative » (3 cas) est à conserver, reclassement
+        possible au cas par cas.
+      valeurs_possibles:
+        "action corrective": "Corrige la cause pour éviter la récidive"
+        "action préventive": "Anticipe un risque avant qu'il se produise"
+        "action curative":   "Traite l'urgence immédiate (symptôme)"
+
+    - cle: titre_action
+      label: "titre de l'action"
+      role: propriete
+      type: texte
+      obligatoire: true
+      embedding: true
+      min_length: 5
+      description: "Libellé court. Rempli 100 %, 916 titres distincts sur 1 300 actions."
+
+    - cle: detail_action
+      label: "détail"
+      role: propriete
+      type: texte
+      embedding: true
+      min_length: 20
+      filtre_vide: true
+      description: "Description complète. Rempli 44,9 % des actions."
+
+    - cle: critere_efficacite
+      label: "Comment sera vérifiée l'efficacité ?"
+      role: propriete
+      type: texte
+      filtre_vide: true
+      description: "Critère de vérification. Rempli 8 % — quasi inexploitable."
+
+    - cle: responsable_externe
+      label: "resp. externe"
+      role: propriete
+      type: texte
+      filtre_vide: true
+      description: "Responsable hors équipe interne. Rempli 26 %."
+
+    - cle: etat_avancement
+      label: "Etat d'avancement"
+      role: propriete
+      type: texte
+      description: "Avancement : 0 % / 25 % / 50 % / 75 % / 100 %."
+
+    - cle: service_action
+      label: "Service responsable"
+      role: propriete
+      type: texte
+      filtre_vide: true
+      description: "Service propriétaire de l'action. Rempli 13,4 %."
+
+    - cle: statut
+      label: "statut"
+      role: propriete
+      type: texte
+      description: "Avancement brut. Rempli 99,7 %."
+      valeurs_possibles:
+        "100": "Action clôturée"
+        "0":   "Action en cours"
+
+    - cle: date_ajout
+      label: "date d'ajout"
+      role: date
+      type: horodatage
+      description: "Date de création de l'action (sert à la déduplication)."
+
+    - cle: date_prevue
+      label: "date prévue"
+      role: date
+      type: horodatage
+      description: "Échéance prévue. Rempli 98,5 %."
+
+    - cle: date_cloture
+      label: "date de clôture"
+      role: date
+      type: horodatage
+      description: "Date de clôture effective."
+
+    - cle: responsable
+      label: "responsable"
+      role: relation
+      noeud: Personne
+      cle_noeud: login
+      relation: ACTION_PAR
+      description: "Login du responsable. PII — non interrogeable."
+
+  champs_ignores:
+    - "coût"    # rempli sur 12 actions (0,9 %) — aucune analyse financière possible
+
+# =============================================================================
+#  CHAMPS SOURCE IGNORÉS — avec le MOTIF de la décision.
+#  Le v2 laissait 45 colonnes sans statut ; ici tout est arbitré.
+# =============================================================================
+champs_ignores:
+
+  # --- Doublons ou champs trompeurs -----------------------------------------
+  - "Analyse des causes"          # 99,4 % « Oui », modalité unique. Mesuré par période :
+                                  # 100 % de 2008 à 2016, dont 100 % SANS aucune cause
+                                  # rédigée -> c'était une valeur par défaut du formulaire.
+                                  # Le champ n'est pas une information, il induit en erreur.
+                                  # « Une analyse a-t-elle eu lieu ? » se dérive de : ∃ cause_* non vide.
+                                  # MÉTIER (Hugo) : après 2016, la bascule à « Oui » dépend du jugement
+                                  # de l'analyste (analyse estimée terminée) — ne pas surinterpréter le « Oui ».
+  - "traitement terminé"          # doublon EXACT de `Étape = Valider (Terminé)` :
+                                  # 4 796 correspondances sur 4 796, une seule exception.
+  - "id categorie evenement"      # doublon INCOHÉRENT de type_evenement : 0 fiche a l'id
+                                  # sans le type, mais 18 types sur 38 mappent vers plusieurs
+                                  # ids. Utile comme signal de contrôle qualité, pas comme dimension.
+                                  # MÉTIER (Hugo) : rempli automatiquement depuis la taxonomie ECCAIRS
+                                  # à partir du type d'événement — donc dérivé, non saisi.
+  - "Statut événement (ECC)"      # 98,5 % « Clos avec analyse sommaire ». Redondant avec État.
+  - "Précisions type événement"   # rempli 0,3 % — à ne pas confondre avec
+                                  # `Type d'événement (autre)` (13,9 %), qui est ingéré.
+  - "Date de vérification"        # utilité MESURÉE 0,91 (rempli 98,6 %) MAIS sémantiquement
+                                  # creuse : délai médian vérif − création = 0 jour, vérificateur
+                                  # connu sur 57,7 % seulement, date = celle de la fiche dans 58,9 %.
+                                  # Date technique auto-remplie à la validation, pas une vérification
+                                  # d'efficacité. Angle mort INVERSE du métrique (haute utilité,
+                                  # valeur de décision nulle) -> ignoré (cf. LIMITE DU MÉTRIQUE).
+
+  # --- Quasi-constants (entropie < 0,10) ------------------------------------
+  - "processus"                   # 99,9 % « Pilotage > PM2 ». Entropie 0,01 : toutes les FNE
+                                  # relèvent du processus de maîtrise des risques par construction.
+  - "organisations informées (ECC)" # 99,6 % « DSAC ». Les 5 fiches « DSAC|BEA » sont les
+                                  # événements les plus graves — signal rare, pas une dimension.
+  - "méthode de classification (ECC)"  # modalité unique « Méthode interne »
+  - "langue de l'exposé (ECC)"    # modalité unique « french »
+  - "entité responsable (ECC)"    # modalité unique « France - DGAC »
+  - "Transmettre vers Eccairs"    # modalité unique « oui »
+
+  # --- Vides à 100 % ---------------------------------------------------------
+  - "Moyens financiers"           # 7ᵉ axe de la méthode : JAMAIS utilisé sur 9 191 fiches.
+                                  # En pratique ADL fait du 6M, pas du 7M — à signaler au métier.
+  - "desc cause 7"                # idem (texte de l'axe Moyens financiers)
+  - "etat/zone de l'événement (ECC)"
+  - "contribution MTO (ECC)"
+  - "etat du sol à l'endroit de l'év."
+  - "dernier point de départ (aéronef 2/ECC)"
+  - "destination prévue (aéronef 2/ECC)"
+
+  # --- Trop peu remplis pour porter une analyse (< 1 %) ----------------------
+  - "latitude"                    # 0,2 %, coordonnées brutes
+  - "longitude"                   # 0,2 %
+  - "type exploitation (ECC)"     # 0,8 %
+  - "type exploitation (aéronef 2/ECC)"
+  - "autre type d'aéronef"        # 0,9 %, doublé par type_aeronef
+  - "autre type d'aéronef (aéronef 2)"
+  - "autre compagnie (aéronef 2)"
+  - "immatriculation [F-XXXX] (aéronef 2/ECC)"   # 0,5 %
+  - "contribution de l'ATM (ECC)"
+  - "service concerné, effet sur le service ATM (ECC)"
+  - "REX similaires"              # 0,1 % — l'idée est bonne, la saisie inexistante
+  - "destination prévue (ECC)"
+  - "dernier point de départ (ECC)"
+  - "relai"
+  - "EISA"
+  - "nom ANSP (ECC)"
+  - "Classe Air-space (ECC)"
+  - "Type Air-space (ECC)"

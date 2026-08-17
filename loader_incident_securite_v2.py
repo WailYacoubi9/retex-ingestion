@@ -18,7 +18,10 @@ from dataclasses import fields
 from datetime import date, datetime, time
 from typing import Any
 
+from qdrant_client.http.models import PointStruct
+
 from clients import Neo4jClient, OllamaClient, QdrantWrapper
+from document_enrichi import construire_chunks
 from models_incident_securite_v2 import IncidentSecuriteV2Canonique
 
 logger = logging.getLogger(__name__)
@@ -86,13 +89,19 @@ def write_incident_to_neo4j(neo4j: Neo4jClient, inc: IncidentSecuriteV2Canonique
             ).consume()
 
 
-def write_incident_to_qdrant(inc: IncidentSecuriteV2Canonique, qdrant: QdrantWrapper,
-                             ollama: OllamaClient) -> int:
-    """Vectorise les narratifs utiles. Retourne le nombre de chunks écrits."""
-    n = 0
-    for champ, texte in inc.textes_pour_embedding().items():
+def build_incident_points(inc: IncidentSecuriteV2Canonique, ollama: OllamaClient,
+                          titres_actions: list[str] | None = None) -> list[PointStruct]:
+    """Construit + vectorise les chunks d'une fiche, SANS écrire (upsert en LOT ensuite).
+
+    Réforme §1 : document enrichi (variante D). `field_canonical` = "fiche" (principal)
+    ou "narratif_long" (débordements) ; l'index de position est dans le point_id car
+    "narratif_long" peut se répéter. L'écriture par lot (ingestion) évite l'explosion de
+    segments RocksDB des upserts un-par-un.
+    """
+    points: list[PointStruct] = []
+    for i, (champ, texte) in enumerate(construire_chunks(inc, titres_actions)):
         vector = ollama.embed(texte)
-        point_id = str(uuid.uuid5(_QDRANT_NAMESPACE, f"{inc.incident_id}:{champ}"))
+        point_id = str(uuid.uuid5(_QDRANT_NAMESPACE, f"{inc.incident_id}:{champ}:{i}"))
         payload = {
             "incident_id": inc.incident_id,
             "numero_fe": inc.numero_fe,
@@ -102,6 +111,14 @@ def write_incident_to_qdrant(inc: IncidentSecuriteV2Canonique, qdrant: QdrantWra
             "severite": inc.severite,
             "is_test_data": inc.is_test_data,
         }
-        qdrant.upsert(point_id=point_id, vector=vector, payload=payload)
-        n += 1
-    return n
+        points.append(PointStruct(id=point_id, vector=vector, payload=payload))
+    return points
+
+
+def write_incident_to_qdrant(inc: IncidentSecuriteV2Canonique, qdrant: QdrantWrapper,
+                             ollama: OllamaClient,
+                             titres_actions: list[str] | None = None) -> int:
+    """Construit + upsert les chunks d'une fiche (voie non-batch). Retourne le nb de chunks."""
+    points = build_incident_points(inc, ollama, titres_actions)
+    qdrant.upsert_points(points)
+    return len(points)

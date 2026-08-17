@@ -24,3 +24,25 @@ venv/
 
 # Logs
 *.log
+
+# ─── Artefacts de mesure contenant des N° FNE RÉELS ────────────────────────────
+#  7 873 références de fiches d'incidents d'un client y figurent. Ils vivent sur
+#  le GitLab interne (origin), jamais sur GitHub. Retirer une ligne d'ici est une
+#  décision de confidentialité, pas de commodité.
+golden_e2e.jsonl
+golden_voies.jsonl
+golden_voies.py
+golden_recommandation.jsonl
+golden_client_v2*.jsonl
+resultats_*.md
+resultats_*.json
+resultats_*.jsonl
+inspect_chunks.md
+comparaison_collections.md
+themes_actions_par_fiche.json
+eval_voies*.md
+eval_collections.md
+eval_contraint_*.md
+eval_synthese.md
+rapport_resultats.md
+rapport_mesures.md

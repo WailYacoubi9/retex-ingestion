@@ -25,16 +25,27 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, QDRANT_URL, OLLAMA_URL
 from clients import Neo4jClient, OllamaClient, QdrantWrapper
-from extractor_incident_securite_v2 import charger_schema, extraire, verifier_coherence
+from extractor_incident_securite_v2 import (
+    charger_schema,
+    extraire,
+    titres_actions_du_payload,
+    verifier_coherence,
+)
 from loader_incident_securite_v2 import (
     bootstrap_neo4j,
+    build_incident_points,
     write_incident_to_neo4j,
     write_incident_to_qdrant,
 )
+
+# Taille de lot d'upsert Qdrant : écrire par paquets (au lieu d'1 point à la fois)
+# évite l'explosion de segments/fichiers RocksDB qui saturait le stockage.
+QDRANT_BATCH = 256
 from llm_enricher_incident_securite_v2 import enrich_incident
 
 DEFAULT_INPUT = Path("data/samples/incidents_securites.json")
-DEFAULT_CONFIG = PROJECT_ROOT / "config" / "schemas" / "incident_securite_v2.schema.yaml"
+# Schéma arbitré v2b (nom_technique reste incident_securite_v2 -> identité stable).
+DEFAULT_CONFIG = PROJECT_ROOT / "config" / "schemas" / "incident_securite_v2b.schema.yaml"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,7 +65,8 @@ def _charger_payloads(path: Path) -> list[dict]:
 
 
 def run(input_path: Path, config_path: Path, limit: int, offset: int,
-        dry_run: bool, embedding: bool, llm: bool = False) -> int:
+        dry_run: bool, embedding: bool, llm: bool = False,
+        recreate: bool = False, write_neo4j: bool = True) -> int:
     if not input_path.exists():
         logger.error("Fichier introuvable : %s", input_path)
         return 1
@@ -88,10 +100,16 @@ def run(input_path: Path, config_path: Path, limit: int, offset: int,
          OllamaClient(url=OLLAMA_URL) as ollama:
 
         qdrant = QdrantWrapper(url=QDRANT_URL)
-        bootstrap_neo4j(neo4j)
+        if write_neo4j:
+            bootstrap_neo4j(neo4j)
         if embedding:
-            qdrant.ensure_collection()
+            if recreate:
+                logger.info("Recréation de la collection Qdrant (suppression des anciens chunks)")
+                qdrant.recreate_collection()
+            else:
+                qdrant.ensure_collection()
 
+        buffer: list = []          # points Qdrant accumulés, flushés par lots de QDRANT_BATCH
         for i, p in enumerate(payloads, 1):
             inc = extraire(p, schema)
             if inc is None:
@@ -100,15 +118,25 @@ def run(input_path: Path, config_path: Path, limit: int, offset: int,
             try:
                 if llm:
                     enrich_incident(ollama, inc)
-                write_incident_to_neo4j(neo4j, inc)
+                if write_neo4j:
+                    write_incident_to_neo4j(neo4j, inc)
                 if embedding:
-                    n_chunks += write_incident_to_qdrant(inc, qdrant, ollama)
+                    titres = titres_actions_du_payload(p, schema)
+                    pts = build_incident_points(inc, ollama, titres)
+                    buffer.extend(pts)
+                    n_chunks += len(pts)
+                    if len(buffer) >= QDRANT_BATCH:
+                        qdrant.upsert_points(buffer, wait=True)
+                        buffer = []
                 n_ok += 1
                 if i % 200 == 0:
-                    logger.info("  ... %d/%d", i, len(payloads))
+                    logger.info("  ... %d/%d (buffer=%d)", i, len(payloads), len(buffer))
             except Exception as e:
                 logger.error("Échec %s : %s", inc.numero_fe, e)
                 n_fail += 1
+
+        if embedding and buffer:      # flush du dernier lot partiel
+            qdrant.upsert_points(buffer, wait=True)
 
     dt = time.time() - t0
     logger.info("===== Récapitulatif =====")
@@ -128,9 +156,16 @@ def main() -> int:
                     help="n'écrit pas dans Qdrant (test rapide sans GPU)")
     ap.add_argument("--with-llm", action="store_true",
                     help="enrichit chaque incident avec un résumé LLM (llama3.1:8b)")
+    ap.add_argument("--recreate-collection", action="store_true",
+                    help="supprime et recrée la collection Qdrant avant ingestion "
+                         "(obligatoire quand on change l'unité d'indexation)")
+    ap.add_argument("--no-neo4j", action="store_true",
+                    help="n'écrit PAS dans Neo4j (A/B chunks : isole l'index Qdrant, "
+                         "graphe live intact)")
     args = ap.parse_args()
     return run(args.input, args.config, args.limit, args.offset,
-               args.dry_run, embedding=not args.no_embedding, llm=args.with_llm)
+               args.dry_run, embedding=not args.no_embedding, llm=args.with_llm,
+               recreate=args.recreate_collection, write_neo4j=not args.no_neo4j)
 
 
 if __name__ == "__main__":
