@@ -1,0 +1,19 @@
+Peux-tu identifier si certains jours de la semaine sont plus accidentogènes que d'autres ?
+Peux-tu me dire quels mois de l'année sont les plus chargés en événements ?
+Peux-tu me faire un top 5 des événements les plus fréquents sur l'aire de trafic uniquement ?
+Peux-tu me montrer, année par année, combien d'événements ont été enregistrés ?
+Peux-tu me proposer une première action simple à mettre en place pour réduire la fréquence d'occurrence de FOD sur les parkings avion, et expliquer pourquoi tu la proposes ?
+Quels sont les 3 facteurs contributifs qui reviennent le plus souvent ?
+Quels sont les 3 types d'événements les plus fréquents dans ma base ?
+Quels sont les événements les plus graves (en termes de gravité déclarée) sur la période ?
+Sur les 2 dernières années seulement, vois-tu une augmentation ou une diminution globale des événements ? Même question en discriminant par typologie d'événements ?
+Sur les 10 dernières années, quelles sont les catégories d'événements de sécurité les plus en hausse, et à quels périodes ou contextes opérationnels sont-elles associées ?
+Peux-tu me donner le nombre total d'événements de sécurité enregistrés sur les 10 dernières années ?
+En analysant les rapports, quels facteurs contributifs (facteurs humains, organisationnels, techniques, environnementaux) reviennent le plus souvent dans les événements de mon aéroport ?
+Peux-tu identifier les zones de l'aéroport (aire de trafic, piste, bretelles, parkings, terminal…) où la fréquence ou la gravité des événements est la plus élevée, et quelles situations typiques y sont observées ?
+À partir de la probabilité et de la gravité des événements constatés, quelles sont aujourd'hui les 5 combinaisons "danger/scénario" qui représenteraient, selon toi, le risque prioritaire pour mon SGS ?
+En comparant avant/après, quelles actions correctives déjà mises en place semblent avoir le plus réduit la fréquence ou la gravité des événements, et lesquelles semblent n'avoir eu que peu d'impact ?
+Peux-tu détecter des signaux faibles, par exemple de petites augmentations d'événements similaires sur les dernières années, qui pourraient annoncer un risque émergent si aucune action n'est prise ?
+En segmentant par type d'acteur à l'origine des événements (compagnies, assistants en escale, services techniques, ATS, etc.), vois-tu des différences significatives dans les types d'événements et leurs facteurs contributifs, et quelles actions spécifiques recommanderais-tu pour chaque catégorie d'acteurs ?
+Sur la base des événements enregistrés, propose 5 actions correctives ou préventives concrètes, classées par priorité, en précisant pour chacune : le danger visé, le mécanisme d'action, l'effet escompté
+En tenant compte de la récurrence des événements et de leur criticité, quel plan de déploiement réaliste des actions (court, moyen, long terme) recommanderais-tu, et quels types de ressources ou compétences seraient les plus critiques pour réussir ces actions ?
